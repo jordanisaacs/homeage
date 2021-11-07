@@ -144,16 +144,16 @@ in
       type = types.str;
     };
 
-    startupPath = mkOption {
-      description = "Absolute path to startup file which will run the decrypt script on startup";
-      default = "${config.home.homeDirectory}/.profile";
-      type = types.str;
-    };
-
     identityPaths = mkOption {
       description = "Absolute path to identity files used for age decryption. Must provide at least one path";
       default = [ ];
       type = types.listOf types.str;
+    };
+
+    decryptScriptPath = mkOption {
+      description = "Absolute path of decryption script. Must be called on login";
+      default = "${config.home.homeDirectory}/.profile";
+      type = types.str;
     };
   };
 
@@ -166,7 +166,10 @@ in
       }];
 
       home.file = installFiles // {
-        "${cfg.startupPath}".text = "${decryptSecrets}/bin/decrypt";
+        "${cfg.decryptScriptPath}" = {
+          executable = true;
+          text = "${decryptSecrets}/bin/decrypt";
+        };
       };
 
       # Needs to be after linkGeneration as script uses symlinked paths

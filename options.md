@@ -18,15 +18,9 @@
 - *Default*: `"${config.home.homeDirectory}/secrets"`;
 - *Type*: `types.str`;
 
-**homeage.startupPath**:
+**homeage.decryptScriptPath**:
 
-- *Description*: Absolute path to startup file which will run the decrypt script on startup
-- *Default*: `"${config.home.homeDirectory}/.profile"`;
-- *Type*: `types.str`;
-
-**homeage.startupPath**:
-
-- *Description*: Absolute path to startup file which will run the decrypt script on startup
+- *Description*: Absolute path of decryption script. Must be called on login
 - *Default*: `"${config.home.homeDirectory}/.profile"`;
 - *Type*: `types.str`;
 
@@ -42,29 +36,29 @@
 - *Default*: `{ }`;
 - *Type*: `types.attrsOf secretFile`;
 
-**homeage.file.<name>**:
+**homeage.file.\<name\>**:
 
-- *Description*: Path of where the file will be saved (after the base paths)
+- *Description*: Path of where the file will be saved (after the base paths). `.age` is appended automatically to the encrypted file path.
 
-**homeage.file.<name>.source**:
+**homeage.file.\<name\>.source**:
 
 - *Description*: Path to the age encrypted file
 - *Default*: none
 - *Type*: `types.path`
 
-**homeage.file.<name>.mode**:
+**homeage.file.\<name\>.mode**:
 
 - *Description*: Permissions mode of the decrypted file
 - *Default*: `"0400"`
 - *Type*: `types.str`
 
-**homeage.file.<name>.owner**:
+**homeage.file.\<name\>.owner**:
 
 - *Description*: User of the decrypted file
 - *Default*: `"$UID"`
 - *Type*: `types.str`
 
-**homeage.file.<name>.group**:
+**homeage.file.\<name\>.group**:
 
 - *Description*: Group of the decrypted file
 - *Default*: `"$(id -g)"`
