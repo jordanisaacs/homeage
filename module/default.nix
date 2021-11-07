@@ -15,6 +15,7 @@ let
   runtimeDecryptPath = path: runtimeDecryptFolder + "/" + path;
   encryptedPath = path: cfg.folder + "/" + path;
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
+  symlinks = secret: builtins.concatStringsSep "\n" (map (link: "ln -s ${secret.runtimepath} ${link}")) secret.links;
 
   # Script to decrypt an age file
   # From https://github.com/ryantm/agenix/pull/58
@@ -22,18 +23,21 @@ let
     let
       sourcePath = encryptedPath secretType.name;
     in
-    ''
-      echo "Decrypting secret ${secretType.encryptpath} to ${secretType.runtimepath}"
-      TMP_FILE="${secretType.runtimepath}.tmp"
-      mkdir $VERBOSE_ARG -p $(dirname ${secretType.runtimepath})
-      (
-        umask u=r,g=,o=
-        ${ageBin} -d ${identities} -o "$TMP_FILE" "${secretType.encryptpath}"
-      )
-      chmod $VERBOSE_ARG ${secretType.mode} "$TMP_FILE"
-      chown $VERBOSE_ARG ${secretType.owner}:${secretType.group} "$TMP_FILE"
-      mv $VERBOSE_ARG -f "$TMP_FILE" "${secretType.runtimepath}"
-    ''
+    builtins.concatStringsSep "\n" [
+      ''
+        echo "Decrypting secret ${secretType.encryptpath} to ${secretType.runtimepath}"
+        TMP_FILE="${secretType.runtimepath}.tmp"
+        mkdir $VERBOSE_ARG -p $(dirname ${secretType.runtimepath})
+        (
+          umask u=r,g=,o=
+          ${ageBin} -d ${identities} -o "$TMP_FILE" "${secretType.encryptpath}"
+        )
+        chmod $VERBOSE_ARG ${secretType.mode} "$TMP_FILE"
+        chown $VERBOSE_ARG ${secretType.owner}:${secretType.group} "$TMP_FILE"
+        mv $VERBOSE_ARG -f "$TMP_FILE" "${secretType.runtimepath}"
+      ''
+      (symLinks secretType)
+    ]
   );
 
   # Convert the file attributes to a list
@@ -46,6 +50,7 @@ let
           group = value.group;
           mode = value.mode;
           owner = value.owner;
+          links = value.symlinks;
         }
       )
       files);
@@ -71,7 +76,7 @@ let
   installFiles = lib.attrsets.mapAttrs'
     (name: value:
       lib.attrsets.nameValuePair
-        ("${cfg.folder}/${name}")
+        ("${cfg.folder}/${name}" + ".age")
         ({
           source = value.source;
         })
@@ -103,6 +108,12 @@ let
         type = types.str;
         default = "$(id -g)";
         description = "Group of the decrypted file";
+      };
+
+      symlinks = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        description = "Symbolically link decrypted file to absolute paths";
       };
     };
   });
