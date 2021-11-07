@@ -2,7 +2,7 @@
 with lib;
 
 let
-  cfg = config.secret;
+  cfg = config.homeage;
 
   # All files are decrypted to /run/user and cleaned up when rebooted
   runtimeDecryptFolder = "/run/user/$UID/secrets";
@@ -108,7 +108,7 @@ let
   });
 in
 {
-  options.secrets = {
+  options.homeage = {
     file = mkOption {
       description = "Attrset of secret files";
       default = { };
