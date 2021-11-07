@@ -15,7 +15,7 @@ let
   runtimeDecryptPath = path: runtimeDecryptFolder + "/" + path;
   encryptedPath = path: cfg.folder + "/" + path;
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
-  symlinks = secret: builtins.concatStringsSep "\n" (map (link: "ln -s ${secret.runtimepath} ${link}")) secret.links;
+  createLinks = secret: builtins.concatStringsSep "\n" ((map (link: "ln -s ${secret.runtimepath} ${link}")) secret.symlinks);
 
   # Script to decrypt an age file
   # From https://github.com/ryantm/agenix/pull/58
@@ -36,7 +36,7 @@ let
         chown $VERBOSE_ARG ${secretType.owner}:${secretType.group} "$TMP_FILE"
         mv $VERBOSE_ARG -f "$TMP_FILE" "${secretType.runtimepath}"
       ''
-      (symLinks secretType)
+      (createLinks secretType)
     ]
   );
 
@@ -50,7 +50,7 @@ let
           group = value.group;
           mode = value.mode;
           owner = value.owner;
-          links = value.symlinks;
+          symlinks = value.symlinks;
         }
       )
       files);
