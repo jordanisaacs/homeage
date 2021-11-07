@@ -15,7 +15,7 @@ let
   runtimeDecryptPath = path: runtimeDecryptFolder + "/" + path;
   encryptedPath = path: cfg.folder + "/" + path + ".age";
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
-  createLinks = secret: builtins.concatStringsSep "\n" ((map (link: "ln -s ${secret.runtimepath} ${link}")) secret.symlinks);
+  createLinks = secret: builtins.concatStringsSep "\n" ((map (link: "ln -sf ${secret.runtimepath} ${link}")) secret.symlinks);
 
   # Script to decrypt an age file
   # From https://github.com/ryantm/agenix/pull/58
@@ -55,7 +55,7 @@ let
       )
       files);
 
-  # install secrets removes the lock file (forces a redecrypt)
+  # install secrets removes existing secrets
   installSecrets = builtins.concatStringsSep "\n" [
     "$DRY_RUN_CMD rm -f ${decryptLock}"
     "$DRY_RUN_CMD ${decryptSecrets}/bin/decrypt"
