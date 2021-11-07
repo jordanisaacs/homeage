@@ -9,7 +9,7 @@
 - [X] Add symbolic links to decrypted files
 - [x] Extremely little bash script so inspect the source yourself!
 - [x] Pre-build files are stored encrypted in your repository
-- [x] Post-buid files are stored encrypted in the nix store
+- [x] Post-buld files are stored encrypted in the nix store
 - [x] During runtime they are stored unencrypted in `/run/user/$UID/secrets`
 
 ## Roadmap
