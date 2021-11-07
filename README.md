@@ -4,12 +4,13 @@
 
 ## Features
 
-- [x] Declarative secrets that can be used inside your home-manager flakes
-- [x] Nothing decrypted stored in the nix store
-- [x] File agnostic, uses plain age
-- [x] Use ssh or age keys
-- [x] Extremely little code, all bash.
+- [x] File agnostic declarative secrets that can be used inside your home-manager flakes
+- [x] Just pure age encryption, use ssh or age keys
 - [X] Add symbolic links to decrypted files
+- [x] Extremely little bash script so inspect the source yourself!
+- [x] Pre-build files are stored encrypted in your repository
+- [x] Post-buid files are stored encrypted in the nix store
+- [x] During runtime they are stored unencrypted in `/run/user/$UID/secrets`
 
 ## Roadmap
 
@@ -22,7 +23,7 @@
 
 While the following below is immense, its mostly just home manager flake boilerplate. All you need to do is import `homeage.homeManagerModules.homeage` into the configuration and set a valid `homeage.identityPaths` and your all set.
 
-```
+```nix
 {
   inputs = {
     nixpkgs.url = "nixpkgs/nixos-unstable";
@@ -35,7 +36,7 @@ While the following below is immense, its mostly just home manager flake boilerp
       # Optional
       inputs.nixpkgs.follows = "nixpkgs";
     };
-  }
+  };
 
   outputs = { nixpkgs, homeage, ... }@inputs:
     let
@@ -47,26 +48,28 @@ While the following below is immense, its mostly just home manager flake boilerp
       username = "jd";
       stateVersion = "21.05";
     in {
-      home-manager.lib.homeManagerConfiguration {
-        inherit system stateVersion username pkgs;
-        home.homeDirectory = "/home/${username}";
-
-        configuration = {
-          home.stateVersion = stateVersion;
-          home.username = username;
+      homeManagerConfigurations = {
+        jd = home-manager.lib.homeManagerConfiguration {
+          inherit system stateVersion username pkgs;
           home.homeDirectory = "/home/${username}";
 
-          # CHECK HERE for homeage configuration
-          homeage.identityPaths = [ "~/.ssh/id_ed25519" ];
-          homeage.file."pijul/secretkey.json" = {
-            source = ./secretkey.json.age;
-            symlinks = [ "${config.xdg.configHome}/pijul/secretkey.json" ];
-          };
+          configuration = {
+            home.stateVersion = stateVersion;
+            home.username = username;
+            home.homeDirectory = "/home/${username}";
 
-          imports = [ homeage.homeManagerModules.homeage ];
+            # CHECK HERE for homeage configuration
+            homeage.identityPaths = [ "~/.ssh/id_ed25519" ];
+            homeage.file."pijul/secretkey.json" = {
+              source = ./secretkey.json.age;
+              symlinks = [ "${config.xdg.configHome}/pijul/secretkey.json" ];
+            };
+
+            imports = [ homeage.homeManagerModules.homeage ];
+          };
         };
       };
-    }
+    };
 }
 ```
 
