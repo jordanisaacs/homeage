@@ -13,7 +13,7 @@ let
   decryptLock = "${runtimeDecryptFolder}/lock";
 
   runtimeDecryptPath = path: runtimeDecryptFolder + "/" + path;
-  encryptedPath = path: cfg.folder + "/" + path;
+  encryptedPath = path: cfg.folder + "/" + path + ".age";
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
   createLinks = secret: builtins.concatStringsSep "\n" ((map (link: "ln -s ${secret.runtimepath} ${link}")) secret.symlinks);
 
@@ -76,7 +76,7 @@ let
   installFiles = lib.attrsets.mapAttrs'
     (name: value:
       lib.attrsets.nameValuePair
-        ("${cfg.folder}/${name}" + ".age")
+        (encryptedPath name)
         ({
           source = value.source;
         })
