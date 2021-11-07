@@ -14,5 +14,6 @@ Check out all the [options](./options.md)
 ## Roadmap
 
 - [ ] Add symbolic links to decrypted files
-- [ ] Add some tests
+- [ ] Support passphrases
+- [ ] Add tests
 
