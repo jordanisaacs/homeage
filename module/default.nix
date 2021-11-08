@@ -12,12 +12,17 @@ let
   runtimeDecryptPath = path: runtimeDecryptFolder + "/" + path;
 
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
-  createLinks = runtimepath: symlinks: builtins.concatStringsSep "\n" ((map (link: "ln -sf ${runtimepath} ${link}")) symlinks);
 
-  decryptSecret = name: { source, path, symlinks, mode, owner, group, ... }:
+  createFiles = command: runtimepath: destinations: builtins.concatStringsSep "\n" ((map (dest: ''
+    mkdir -p $(dirname ${dest})
+    ${command} ${runtimepath} ${dest}
+  '')) destinations);
+
+  decryptSecret = name: { source, path, symlinks, cpOnService, mode, owner, group, ... }:
     let
       runtimepath = runtimeDecryptPath path;
-      links = createLinks runtimepath symlinks;
+      linksCmds = createFiles "ln -sf" runtimepath symlinks;
+      copiesCmds = createFiles "cp -f" runtimepath cpOnService;
     in
     pkgs.writeShellScriptBin "${name}-decrypt" ''
       set -euo pipefail
@@ -32,7 +37,8 @@ let
       chmod ${mode} "$TMP_FILE"
       chown ${owner}:${group} "$TMP_FILE"
       mv -f "$TMP_FILE" "${runtimepath}"
-      ${links}
+      ${linksCmds}
+      ${copiesCmds}
     '';
 
   mkServices = lib.attrsets.mapAttrs'
@@ -93,6 +99,12 @@ let
         type = types.listOf types.str;
         default = [ ];
         description = "Symbolically link decrypted file to absolute paths";
+      };
+
+      cpOnService = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        description = "Copy decrypted file to absolute paths";
       };
     };
 
