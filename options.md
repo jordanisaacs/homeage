@@ -18,6 +18,12 @@
 - *Default*: `"${config.home.homeDirectory}/secrets"`;
 - *Type*: `types.str`;
 
+**homeage.mount**:
+
+- *Description*: Absolute path to folder where decrypted files are stored. Files are decrypted on login. Defaults to /run which is a tmpfs.
+- *Default*: `/run/user/$UID/secrets`;
+- *Type*: `types.str`;
+
 **homeage.decryptScriptPath**:
 
 - *Description*: Absolute path of decryption script. Must be called on login
@@ -69,7 +75,3 @@
 - *Description*: Group of the decrypted file
 - *Default*: `"$(id -g)"`
 - *Type*: `types.str`
-
-
-
-
