@@ -22,16 +22,18 @@ let
       links = createLinks runtimepath symlinks;
     in
     pkgs.writeShellScriptBin "${name}-decrypt" ''
-      ${pkgs.coreutils}/bin/echo "Decrypting secret ${encryptpath} to ${runtimepath}"
+      set -euo pipefail
+
+      echo "Decrypting secret ${encryptpath} to ${runtimepath}"
       TMP_FILE="${runtimepath}.tmp"
-      ${pkgs.coreutils}/bin/mkdir $VERBOSE_ARG -p $(${pkgs.coreutils}/bin/dirname ${runtimepath})
+      mkdir -p $(dirname ${runtimepath})
       (
         umask u=r,g=,o=
         ${ageBin} -d ${identities} -o "$TMP_FILE" "${encryptpath}"
       )
-      ${pkgs.coreutils}/bin/chmod $VERBOSE_ARG ${mode} "$TMP_FILE"
-      ${pkgs.coreutils}/bin/chown $VERBOSE_ARG ${owner}:${group} "$TMP_FILE"
-      ${pkgs.coreutils}/bin/mv $VERBOSE_ARG -f "$TMP_FILE" "${runtimepath}"
+      chmod ${mode} "$TMP_FILE"
+      chown ${owner}:${group} "$TMP_FILE"
+      mv -f "$TMP_FILE" "${runtimepath}"
       ${links}
     '';
 
@@ -47,6 +49,7 @@ let
           Service = {
             Type = "oneshot";
             ExecStart = "${decryptSecret name value}/bin/${name}-decrypt";
+            Environment = "PATH=${makeBinPath [ pkgs.coreutils ]}";
           };
 
           Install = {
