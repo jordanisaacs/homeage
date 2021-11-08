@@ -5,7 +5,7 @@ let
   cfg = config.homeage;
 
   # All files are decrypted to /run/user and cleaned up when rebooted
-  runtimeDecryptFolder = "/run/user/$UID/secrets";
+  runtimeDecryptFolder = cfg.mount;
 
   ageBin = if cfg.isRage then "${cfg.pkg}/bin/rage" else "${cfg.pkg}/bin/age";
 
@@ -125,6 +125,12 @@ in
       description = "Is rage package";
       default = false;
       type = types.bool;
+    };
+
+    mount = mkOption {
+      description = "Absolute path to folder where decrypted files are stored. Files are decrypted on login. Defaults to /run which is a tmpfs.";
+      default = "/run/user/$UID/secrets";
+      type = types.str;
     };
 
     folder = mkOption {
