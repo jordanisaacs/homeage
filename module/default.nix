@@ -72,7 +72,7 @@ let
   secretFile = types.submodule ({ config, ... }: {
     options = {
       path = mkOption {
-        description = "Path to Name to give decryption service file";
+        description = "Relative path of where the file will be saved (in secret folder and /run). .age is appended automatically to the encrypted file path.";
         type = types.str;
       };
 
