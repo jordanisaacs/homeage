@@ -9,74 +9,58 @@ let
 
   ageBin = if cfg.isRage then "${cfg.pkg}/bin/rage" else "${cfg.pkg}/bin/age";
 
-  # The lock file so only decrypts when activating home-manager and logging in for first time
-  decryptLock = "${runtimeDecryptFolder}/lock";
-
   runtimeDecryptPath = path: runtimeDecryptFolder + "/" + path;
   encryptedPath = path: cfg.folder + "/" + path + ".age";
+
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
-  createLinks = secret: builtins.concatStringsSep "\n" ((map (link: "ln -sf ${secret.runtimepath} ${link}")) secret.symlinks);
+  createLinks = runtimepath: symlinks: builtins.concatStringsSep "\n" ((map (link: "ln -sf ${runtimepath} ${link}")) symlinks);
 
-  # Script to decrypt an age file
-  # From https://github.com/ryantm/agenix/pull/58
-  decryptSecret = secretType: (
+  decryptSecret = name: { path, symlinks, mode, owner, group, ... }:
     let
-      sourcePath = encryptedPath secretType.name;
+      runtimepath = runtimeDecryptPath path;
+      encryptpath = encryptedPath path;
+      links = createLinks runtimepath symlinks;
     in
-    builtins.concatStringsSep "\n" [
-      ''
-        echo "Decrypting secret ${secretType.encryptpath} to ${secretType.runtimepath}"
-        TMP_FILE="${secretType.runtimepath}.tmp"
-        mkdir $VERBOSE_ARG -p $(dirname ${secretType.runtimepath})
-        (
-          umask u=r,g=,o=
-          ${ageBin} -d ${identities} -o "$TMP_FILE" "${secretType.encryptpath}"
-        )
-        chmod $VERBOSE_ARG ${secretType.mode} "$TMP_FILE"
-        chown $VERBOSE_ARG ${secretType.owner}:${secretType.group} "$TMP_FILE"
-        mv $VERBOSE_ARG -f "$TMP_FILE" "${secretType.runtimepath}"
-      ''
-      (createLinks secretType)
-    ]
-  );
-
-  # Convert the file attributes to a list
-  fileToList = files: map decryptSecret
-    (attrsets.mapAttrsToList
-      (name: value:
-        {
-          runtimepath = runtimeDecryptPath name;
-          encryptpath = encryptedPath name;
-          group = value.group;
-          mode = value.mode;
-          owner = value.owner;
-          symlinks = value.symlinks;
-        }
+    pkgs.writeShellScriptBin "${name}-decrypt" ''
+      ${pkgs.coreutils}/bin/echo "Decrypting secret ${encryptpath} to ${runtimepath}"
+      TMP_FILE="${runtimepath}.tmp"
+      ${pkgs.coreutils}/bin/mkdir $VERBOSE_ARG -p $(${pkgs.coreutils}/bin/dirname ${runtimepath})
+      (
+        umask u=r,g=,o=
+        ${ageBin} -d ${identities} -o "$TMP_FILE" "${encryptpath}"
       )
-      files);
+      ${pkgs.coreutils}/bin/chmod $VERBOSE_ARG ${mode} "$TMP_FILE"
+      ${pkgs.coreutils}/bin/chown $VERBOSE_ARG ${owner}:${group} "$TMP_FILE"
+      ${pkgs.coreutils}/bin/mv $VERBOSE_ARG -f "$TMP_FILE" "${runtimepath}"
+      ${links}
+    '';
 
-  # install secrets removes existing secrets
-  installSecrets = builtins.concatStringsSep "\n" [
-    "$DRY_RUN_CMD rm -f ${decryptLock}"
-    "$DRY_RUN_CMD ${decryptSecrets}/bin/decrypt"
-  ];
+  mkServices = lib.attrsets.mapAttrs'
+    (name: value:
+      lib.attrsets.nameValuePair
+        ("${name}-secret")
+        ({
+          Unit = {
+            Description = "Decrypt ${name} secret";
+          };
 
-  # decrypt secrets if lock file does not exist
-  decryptSecrets = pkgs.writeShellScriptBin "decrypt" (builtins.concatStringsSep "\n" ([
-    ''
-      if [ -f "${decryptLock}" ]; then
-        exit 1
-      fi
-    ''
-  ] ++ (fileToList cfg.file) ++ [
-    "touch ${decryptLock}"
-  ]));
+          Service = {
+            Type = "oneshot";
+            ExecStart = "${decryptSecret name value}/bin/${name}-decrypt";
+          };
+
+          Install = {
+            WantedBy = [ "default.target" ];
+          };
+        })
+    )
+    cfg.file;
 
   # Modify our files into home.file format
   installFiles = lib.attrsets.mapAttrs'
     (name: value:
       lib.attrsets.nameValuePair
-        (encryptedPath name)
+        (encryptedPath value.path)
         ({
           source = value.source;
         })
@@ -87,6 +71,11 @@ let
   # Based on https://github.com/ryantm/agenix/pull/58
   secretFile = types.submodule ({ config, ... }: {
     options = {
+      path = mkOption {
+        description = "Path to Name to give decryption service file";
+        type = types.str;
+      };
+
       source = mkOption {
         description = "Path to the age encrypted file";
         type = types.path;
@@ -158,22 +147,15 @@ in
   };
 
   config = mkIf (cfg.file != { }) (mkMerge [
-
     {
       assertions = [{
         assertion = cfg.identityPaths != [ ];
         message = "secret.identityPaths must be set.";
       }];
 
-      home.file = installFiles // {
-        "${cfg.decryptScriptPath}" = {
-          executable = true;
-          text = "${decryptSecrets}/bin/decrypt";
-        };
-      };
+      home.file = installFiles;
 
-      # Needs to be after linkGeneration as script uses symlinked paths
-      home.activation.homeage = hm.dag.entryAfter [ "linkGeneration" ] installSecrets;
+      systemd.user.services = mkServices;
     }
   ]);
 }
