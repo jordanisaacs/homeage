@@ -38,7 +38,13 @@
 
 **homeage.file.\<name\>**:
 
-- *Description*: Path of where the file will be saved (after the base paths). `.age` is appended automatically to the encrypted file path.
+- *Description*: Name of the service unit that decrypts the secret (`{name}-secret`)
+
+**homeage.file.\<name\>**:
+
+- *Description*: Relative path of where the file will be saved (in secret folder and `/run`). `.age` is appended automatically to the encrypted file path.
+- *Default*: none
+- *Type*: `types.str`
 
 **homeage.file.\<name\>.source**:
 
