@@ -5,16 +5,23 @@
 ## Features
 
 - [x] File agnostic declarative secrets that can be used inside your home-manager flakes
-- [x] Just pure age encryption, use ssh or age keys
+- [x] Each secret gets decrypted with its own systemd service integrating seamlessly with home-manager reload and update
+- [x] Just normal age encryption, use ssh or age keys
 - [X] Add symbolic links to decrypted files
 - [x] Extremely little bash script so inspect the source yourself!
-- [x] Pre-build files are stored encrypted in your repository
-- [x] Post-buid files are stored encrypted in the nix store
-- [x] During runtime they are stored unencrypted in `/run/user/$UID/secrets`
+
+## Management Scheme
+
+Pre-Build: Files are encrypted by external age key in repository (unencrypted with associated public key on roadmap)
+
+Post-Build: Files are encrypted by external age key while in nix store
+
+Runtime: Files are stored unencrytped in `/run/user/$UID/secrets` and can be symlinked to other locations
 
 ## Roadmap
 
 - [ ] Support passphrases
+- [ ] Support unencrypted with public key files
 - [ ] Add tests
 
 ## Getting started
@@ -60,8 +67,9 @@ While the following below is immense, its mostly just home manager flake boilerp
 
             # CHECK HERE for homeage configuration
             homeage.identityPaths = [ "~/.ssh/id_ed25519" ];
-            homeage.file."pijul/secretkey.json" = {
+            homeage.file."pijulsecretkey" = {
               source = ./secretkey.json.age;
+              path = "pijul/secretkey.json";
               symlinks = [ "${config.xdg.configHome}/pijul/secretkey.json" ];
             };
 
@@ -79,8 +87,7 @@ Check out all the [options](./options.md)
 
 ## How it works
 
-On home manager build, the age-encrypted files are built into the nix store and symlinked to the provided `homage.folder` path. This is achieved through the home-manager `home.file` option. Notice that all secret files are encrypted while in the nix store. After the symlinks are finished by home-manager, a decryption script runs. This decryption script is built during the home manager build. To add/remove secrets need to build home manager (hence declarative). The script decrypts the secrets to `/run/user/$UID/secrets/` using the identities provided by `homeage.identityPaths`. It then acts on the decrypted file (changing ownership, linking, etc.). When rebooting, the decrypted files are lost as they are in the `/run` folder. Therefore, the decryption script gets called on login using the provided `homeage.startupPath`. To prevent the decryption script from running unnecessarily, a `/run/user/$UID/secrets/lock` file is created on first decryption.
-
+On home manager build, the age-encrypted files are built into the nix store and symlinked to the provided `homage.folder` path. This is achieved through the home-manager `home.file` option. Notice that all secret files are encrypted while in the nix store. After the symlinks are finished by home-manager, the systemd units are run. Each secret has its own `oneshot` service that runs a decryption script. This works seamlessly with home-managers updating/reloading of systemd units. The script decrypts the secrets to `/run/user/$UID/secrets/` using the identities provided by `homeage.identityPaths`. It then acts on the decrypted file (changing ownership, linking, etc.). When rebooting, the decrypted files are lost as they are in the `/run` folder. Therefore, the systemd unit is wanted by `default.target` so it will run on startup.
 
 ## Acknowledgments
 
