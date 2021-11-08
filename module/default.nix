@@ -59,7 +59,7 @@ let
 
   # Options for a secret file
   # Based on https://github.com/ryantm/agenix/pull/58
-  secretFile = types.submodule ({ config, ... }: {
+  secretFile = types.submodule ({ name, ... }: {
     options = {
       path = mkOption {
         description = "Relative path of where the file will be saved in /run";
@@ -94,6 +94,10 @@ let
         default = [ ];
         description = "Symbolically link decrypted file to absolute paths";
       };
+    };
+
+    config = {
+      path = mkDefault name;
     };
   });
 in

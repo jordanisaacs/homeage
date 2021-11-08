@@ -37,7 +37,7 @@
 **homeage.file.\<name\>.path**:
 
 - *Description*: Relative path of where the file will be saved in `/run`)
-- *Default*: none
+- *Default*: value of `name`
 - *Type*: `types.str`
 
 **homeage.file.\<name\>.source**:
