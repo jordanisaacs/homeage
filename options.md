@@ -24,12 +24,6 @@
 - *Default*: `/run/user/$UID/secrets`;
 - *Type*: `types.str`;
 
-**homeage.decryptScriptPath**:
-
-- *Description*: Absolute path of decryption script. Must be called on login
-- *Default*: `"${config.home.homeDirectory}/.profile"`;
-- *Type*: `types.str`;
-
 **homeage.identityPaths**:
 
 - *Description*: Absolute path to identity files used for age decryption. Must provide at least one path

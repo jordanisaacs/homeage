@@ -147,12 +147,6 @@ in
       default = [ ];
       type = types.listOf types.str;
     };
-
-    decryptScriptPath = mkOption {
-      description = "Absolute path of decryption script. Must be called on login";
-      default = "${config.home.homeDirectory}/.profile";
-      type = types.str;
-    };
   };
 
   config = mkIf (cfg.file != { }) (mkMerge [
