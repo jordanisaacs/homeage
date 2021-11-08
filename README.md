@@ -16,7 +16,7 @@ Pre-Build: Files are encrypted by external age key in repository (unencrypted wi
 
 Post-Build: Files are encrypted by external age key while in nix store
 
-Runtime: Files are stored unencrytped in `/run/user/$UID/secrets` and can be symlinked to other locations
+Runtime: Files are stored unencrypted in `/run/user/$UID/secrets` and can be symlinked to other locations
 
 ## Roadmap
 
@@ -87,7 +87,7 @@ Check out all the [options](./options.md)
 
 ## How it works
 
-On home manager build, the age-encrypted files are built into the nix store and symlinked to the provided `homage.folder` path. This is achieved through the home-manager `home.file` option. Notice that all secret files are encrypted while in the nix store. After the symlinks are finished by home-manager, the systemd units are run. Each secret has its own `oneshot` service that runs a decryption script. This works seamlessly with home-managers updating/reloading of systemd units. The script decrypts the secrets to `/run/user/$UID/secrets/` using the identities provided by `homeage.identityPaths`. It then acts on the decrypted file (changing ownership, linking, etc.). When rebooting, the decrypted files are lost as they are in the `/run` folder. Therefore, the systemd unit is wanted by `default.target` so it will run on startup.
+On home manager build, the age-encrypted files are built into the nix store and symlinked to the provided `homeage.folder` path. This is achieved through the home-manager `home.file` option. Notice that all secret files are encrypted while in the nix store. After the symlinks are finished by home-manager, the systemd units are run. Each secret has its own `oneshot` service that runs a decryption script. This works seamlessly with home-managers updating/reloading of systemd units. The script decrypts the secrets to `/run/user/$UID/secrets/` using the identities provided by `homeage.identityPaths`. It then acts on the decrypted file (changing ownership, linking, etc.). When rebooting, the decrypted files are lost as they are in the `/run` folder. Therefore, the systemd unit is wanted by `default.target` so it will run on startup.
 
 ## Acknowledgments
 
