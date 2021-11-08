@@ -10,26 +10,24 @@ let
   ageBin = if cfg.isRage then "${cfg.pkg}/bin/rage" else "${cfg.pkg}/bin/age";
 
   runtimeDecryptPath = path: runtimeDecryptFolder + "/" + path;
-  encryptedPath = path: cfg.folder + "/" + path + ".age";
 
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
   createLinks = runtimepath: symlinks: builtins.concatStringsSep "\n" ((map (link: "ln -sf ${runtimepath} ${link}")) symlinks);
 
-  decryptSecret = name: { path, symlinks, mode, owner, group, ... }:
+  decryptSecret = name: { source, path, symlinks, mode, owner, group, ... }:
     let
       runtimepath = runtimeDecryptPath path;
-      encryptpath = encryptedPath path;
       links = createLinks runtimepath symlinks;
     in
     pkgs.writeShellScriptBin "${name}-decrypt" ''
       set -euo pipefail
 
-      echo "Decrypting secret ${encryptpath} to ${runtimepath}"
+      echo "Decrypting secret ${source} to ${runtimepath}"
       TMP_FILE="${runtimepath}.tmp"
       mkdir -p $(dirname ${runtimepath})
       (
         umask u=r,g=,o=
-        ${ageBin} -d ${identities} -o "$TMP_FILE" "${encryptpath}"
+        ${ageBin} -d ${identities} -o "$TMP_FILE" "${source}"
       )
       chmod ${mode} "$TMP_FILE"
       chown ${owner}:${group} "$TMP_FILE"
@@ -59,23 +57,12 @@ let
     )
     cfg.file;
 
-  # Modify our files into home.file format
-  installFiles = lib.attrsets.mapAttrs'
-    (name: value:
-      lib.attrsets.nameValuePair
-        (encryptedPath value.path)
-        ({
-          source = value.source;
-        })
-    )
-    cfg.file;
-
   # Options for a secret file
   # Based on https://github.com/ryantm/agenix/pull/58
   secretFile = types.submodule ({ config, ... }: {
     options = {
       path = mkOption {
-        description = "Relative path of where the file will be saved (in secret folder and /run). .age is appended automatically to the encrypted file path.";
+        description = "Relative path of where the file will be saved in /run";
         type = types.str;
       };
 
@@ -136,12 +123,6 @@ in
       type = types.str;
     };
 
-    folder = mkOption {
-      description = "Absolute path to folder where encrypted age files are symlinked to";
-      default = "${config.home.homeDirectory}/secrets";
-      type = types.str;
-    };
-
     identityPaths = mkOption {
       description = "Absolute path to identity files used for age decryption. Must provide at least one path";
       default = [ ];
@@ -155,8 +136,6 @@ in
         assertion = cfg.identityPaths != [ ];
         message = "secret.identityPaths must be set.";
       }];
-
-      home.file = installFiles;
 
       systemd.user.services = mkServices;
     }
