@@ -18,8 +18,15 @@ Post-Build: Files are encrypted by external age key while in nix store
 
 Runtime: Files are stored unencrypted in `/run/user/$UID/secrets` and can be symlinked to other locations
 
+Notes (in progress [fixes](https://github.com/jordanisaacs/homeage/issues/8#issue-1047731755)):
+
+1. Currently all `home.file.<name>.symlinks` are not cleaned up on new home-manager generation. Therefore a symlink that points to a decrypted yaml file named `hello` in one generation, instead of being deleted will point to a png file named `hello` in the next.
+
+2. Currently the `/run` secrets folder is not cleaned on home-manager activation. Therefore old secrets will exist decrypted until reboot.
+
 ## Roadmap
 
+- [ ] Implement cleanup
 - [ ] Support passphrases
 - [ ] Support unencrypted with public key files
 - [ ] Add tests
