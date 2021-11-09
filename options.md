@@ -12,22 +12,10 @@
 - *Default*: `false`;
 - *Type*: `types.bool`;
 
-**homeage.folder**:
-
-- *Description*: Folder where encrypted age files are symlinked to
-- *Default*: `"${config.home.homeDirectory}/secrets"`;
-- *Type*: `types.str`;
-
 **homeage.mount**:
 
 - *Description*: Absolute path to folder where decrypted files are stored. Files are decrypted on login. Defaults to /run which is a tmpfs.
 - *Default*: `/run/user/$UID/secrets`;
-- *Type*: `types.str`;
-
-**homeage.decryptScriptPath**:
-
-- *Description*: Absolute path of decryption script. Must be called on login
-- *Default*: `"${config.home.homeDirectory}/.profile"`;
 - *Type*: `types.str`;
 
 **homeage.identityPaths**:
@@ -46,10 +34,10 @@
 
 - *Description*: Name of the service unit that decrypts the secret (`{name}-secret`)
 
-**homeage.file.\<name\>**:
+**homeage.file.\<name\>.path**:
 
-- *Description*: Relative path of where the file will be saved (in secret folder and `/run`). `.age` is appended automatically to the encrypted file path.
-- *Default*: none
+- *Description*: Relative path of where the file will be saved in `/run`)
+- *Default*: value of `name`
 - *Type*: `types.str`
 
 **homeage.file.\<name\>.source**:

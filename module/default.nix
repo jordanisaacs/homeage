@@ -10,29 +10,35 @@ let
   ageBin = if cfg.isRage then "${cfg.pkg}/bin/rage" else "${cfg.pkg}/bin/age";
 
   runtimeDecryptPath = path: runtimeDecryptFolder + "/" + path;
-  encryptedPath = path: cfg.folder + "/" + path + ".age";
 
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
-  createLinks = runtimepath: symlinks: builtins.concatStringsSep "\n" ((map (link: "ln -sf ${runtimepath} ${link}")) symlinks);
 
-  decryptSecret = name: { path, symlinks, mode, owner, group, ... }:
+  createFiles = command: runtimepath: destinations: builtins.concatStringsSep "\n" ((map (dest: ''
+    mkdir -p $(dirname ${dest})
+    ${command} ${runtimepath} ${dest}
+  '')) destinations);
+
+  decryptSecret = name: { source, path, symlinks, cpOnService, mode, owner, group, ... }:
     let
       runtimepath = runtimeDecryptPath path;
-      encryptpath = encryptedPath path;
-      links = createLinks runtimepath symlinks;
+      linksCmds = createFiles "ln -sf" runtimepath symlinks;
+      copiesCmds = createFiles "cp -f" runtimepath cpOnService;
     in
     pkgs.writeShellScriptBin "${name}-decrypt" ''
-      ${pkgs.coreutils}/bin/echo "Decrypting secret ${encryptpath} to ${runtimepath}"
+      set -euo pipefail
+
+      echo "Decrypting secret ${source} to ${runtimepath}"
       TMP_FILE="${runtimepath}.tmp"
-      ${pkgs.coreutils}/bin/mkdir $VERBOSE_ARG -p $(${pkgs.coreutils}/bin/dirname ${runtimepath})
+      mkdir -p $(dirname ${runtimepath})
       (
         umask u=r,g=,o=
-        ${ageBin} -d ${identities} -o "$TMP_FILE" "${encryptpath}"
+        ${ageBin} -d ${identities} -o "$TMP_FILE" "${source}"
       )
-      ${pkgs.coreutils}/bin/chmod $VERBOSE_ARG ${mode} "$TMP_FILE"
-      ${pkgs.coreutils}/bin/chown $VERBOSE_ARG ${owner}:${group} "$TMP_FILE"
-      ${pkgs.coreutils}/bin/mv $VERBOSE_ARG -f "$TMP_FILE" "${runtimepath}"
-      ${links}
+      chmod ${mode} "$TMP_FILE"
+      chown ${owner}:${group} "$TMP_FILE"
+      mv -f "$TMP_FILE" "${runtimepath}"
+      ${linksCmds}
+      ${copiesCmds}
     '';
 
   mkServices = lib.attrsets.mapAttrs'
@@ -47,6 +53,7 @@ let
           Service = {
             Type = "oneshot";
             ExecStart = "${decryptSecret name value}/bin/${name}-decrypt";
+            Environment = "PATH=${makeBinPath [ pkgs.coreutils ]}";
           };
 
           Install = {
@@ -56,23 +63,12 @@ let
     )
     cfg.file;
 
-  # Modify our files into home.file format
-  installFiles = lib.attrsets.mapAttrs'
-    (name: value:
-      lib.attrsets.nameValuePair
-        (encryptedPath value.path)
-        ({
-          source = value.source;
-        })
-    )
-    cfg.file;
-
   # Options for a secret file
   # Based on https://github.com/ryantm/agenix/pull/58
-  secretFile = types.submodule ({ config, ... }: {
+  secretFile = types.submodule ({ name, ... }: {
     options = {
       path = mkOption {
-        description = "Relative path of where the file will be saved (in secret folder and /run). .age is appended automatically to the encrypted file path.";
+        description = "Relative path of where the file will be saved in /run";
         type = types.str;
       };
 
@@ -104,6 +100,16 @@ let
         default = [ ];
         description = "Symbolically link decrypted file to absolute paths";
       };
+
+      cpOnService = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        description = "Copy decrypted file to absolute paths";
+      };
+    };
+
+    config = {
+      path = mkDefault name;
     };
   });
 in
@@ -133,22 +139,10 @@ in
       type = types.str;
     };
 
-    folder = mkOption {
-      description = "Absolute path to folder where encrypted age files are symlinked to";
-      default = "${config.home.homeDirectory}/secrets";
-      type = types.str;
-    };
-
     identityPaths = mkOption {
       description = "Absolute path to identity files used for age decryption. Must provide at least one path";
       default = [ ];
       type = types.listOf types.str;
-    };
-
-    decryptScriptPath = mkOption {
-      description = "Absolute path of decryption script. Must be called on login";
-      default = "${config.home.homeDirectory}/.profile";
-      type = types.str;
     };
   };
 
@@ -158,8 +152,6 @@ in
         assertion = cfg.identityPaths != [ ];
         message = "secret.identityPaths must be set.";
       }];
-
-      home.file = installFiles;
 
       systemd.user.services = mkServices;
     }
