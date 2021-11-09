@@ -63,3 +63,9 @@
 - *Description*: Group of the decrypted file
 - *Default*: `"$(id -g)"`
 - *Type*: `types.str`
+
+**homeage.file.\<name\>.cpOnService**:
+
+- *Description*: Copy the decrypted file to path when decryption service runs. Use at own risk (no cleanup so file must be deleted manually)
+- *Default*: `[ ]`
+- *Type*: `types.str`

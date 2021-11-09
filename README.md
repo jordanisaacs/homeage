@@ -20,15 +20,18 @@ Runtime: Files are stored unencrypted in `/run/user/$UID/secrets` and can be sym
 
 Notes (in progress [fixes](https://github.com/jordanisaacs/homeage/issues/8#issue-1047731755)):
 
-1. Currently all `home.file.<name>.symlinks` are not cleaned up on new home-manager generation. Therefore a symlink that points to a decrypted yaml file named `hello` in one generation, instead of being deleted will point to a png file named `hello` in the next.
+1. All `home.file.<name>.symlinks` are not cleaned up on new home-manager generation. Therefore a symlink that points to a decrypted yaml file named `hello` in one generation, instead of being deleted will point to a png file named `hello` in the next.
 
-2. Currently the `/run` secrets folder is not cleaned on home-manager activation. Therefore old secrets will exist decrypted until reboot.
+2. The `/run` secrets folder is not cleaned on home-manager activation. Therefore old secrets will exist decrypted until reboot.
+
+3. Use the `cpOnService` at your own risk, as cleanup is not implemented the decrypted file will exist until manually deleted
 
 ## Roadmap
 
 - [ ] Implement cleanup
 - [ ] Support passphrases
 - [ ] Support unencrypted with public key files
+- [ ] Add activation checks
 - [ ] Add tests
 
 ## Getting started
