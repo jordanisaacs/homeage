@@ -194,12 +194,86 @@ in
 
   config = mkIf (cfg.file != { }) (mkMerge [
     {
-      assertions = [{
-        assertion = cfg.identityPaths != [ ];
-        message = "secret.identityPaths must be set.";
-      }];
+      assertions =
+        let
+          makePathVal = path: { ${path} = 1; };
+          pathsToCount = with builtins; list:
+            map (path: makePathVal path) list;
+
+          secretRuntimePaths =
+            # [ { path1 = 1} { path2 = 1 } { path1 = 1 } { path3 = 1 }]
+            concatLists
+              # [ [ { path1 = 1} { path2 = 1 } ] [ { path1 = 1 } { path3 = 1 }]
+              (mapAttrsToList
+                (name: value:
+                  (
+                    (if (length value.lnOnStartup > 0 && cfg.startupMount != null) then [
+                      (makePathVal (startupDecryptPath value.decryptPath))
+                    ] else [ ]) ++
+                    (if (length value.lnOnActivation > 0 && cfg.activationMount != null) then [
+                      (makePathVal (activationDecryptPath value.decryptPath))
+                    ] else [ ]) ++
+                    (pathsToCount value.lnOnStartup) ++
+                    (pathsToCount value.lnOnActivation) ++
+                    (pathsToCount value.cpOnStartup) ++
+                    (pathsToCount value.cpOnStartup)
+                  )
+                )
+                cfg.file
+              );
+
+
+          allPaths = secretRuntimePaths ++ (mapAttrsToList
+            (n: v: { "${config.home.homeDirectory}/${v.target}" = 1; })
+            config.home.file);
+
+          dupRuntimePaths =
+            attrNames
+              (filterAttrs
+                (n: v: v > 1)
+                (foldAttrs
+                  (acc: v: acc + v)
+                  0
+                  allPaths
+                )
+              );
+
+          dupsStr = concatStringsSep ", " dupRuntimePaths;
+
+          hasActivationLinks = with builtins;
+            filterAttrs (n: v: (length v.lnOnActivation) > 0) cfg.file;
+
+          hasStartupLinks = with builtins;
+            filterAttrs (n: v: (length v.lnOnStartup) > 0) cfg.file;
+        in
+        [
+          ({
+            assertion = cfg.identityPaths != [ ];
+            message = "secret.identityPaths must be set.";
+          })
+          ({
+            assertion = if hasActivationLinks != { } then cfg.activationMount != null else true;
+            message = "Must set homeage.activationMount if using symlinked activation secrets";
+          })
+          ({
+            assertion = if hasStartupLinks != { } then cfg.startupMount != null else false;
+            message = "Must set homeage.startupMount if using symlinked startup secrets";
+          })
+          ({
+            assertion = dupRuntimePaths == [ ];
+            message = "Conflicting managed target files (including secrets): ${dupsStr}";
+          })
+        ];
 
       systemd.user.services = mkServices;
+
+      homeage = {
+        pkg = lib.mkDefault pkgs.age;
+        isRage = lib.mkDefault false;
+        identityPaths = lib.mkDefault [ ];
+        startupMount = lib.mkDefault "/run/user/$UID/secrets";
+        activationMount = lib.mkDefault null;
+      };
     }
   ]);
 }
