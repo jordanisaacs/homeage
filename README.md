@@ -12,11 +12,15 @@
 
 ## Management Scheme
 
-Pre-Build: Files are encrypted by external age key in repository (unencrypted with associated public key on roadmap)
+**Pre-Build**: Files are encrypted by external age key in repository (unencrypted with associated public key on roadmap)
 
-Post-Build: Files are encrypted by external age key while in nix store
+**Post-Build**: Files are encrypted by external age key while in nix store
 
-Runtime: Files are stored unencrypted in `/run/user/$UID/secrets` and can be symlinked to other locations
+**Runtime**: Files are stored unencrypted in `/run/user/$UID/secrets` and can be symlinked to other locations
+
+**Safety Checks**:
+
+- On activation, ensures there are no conflicts with other declared paths (including `home.file` paths)
 
 Notes (in progress [fixes](https://github.com/jordanisaacs/homeage/issues/8#issue-1047731755)):
 
@@ -29,7 +33,7 @@ Notes (in progress [fixes](https://github.com/jordanisaacs/homeage/issues/8#issu
 - [ ] Implement cleanup
 - [ ] Support passphrases
 - [ ] Support unencrypted with public key files
-- [ ] Add tests
+- [ ] Add checks
 
 ## Getting started
 
