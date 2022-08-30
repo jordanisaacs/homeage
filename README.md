@@ -61,7 +61,7 @@ While the following below is immense, its mostly just home manager flake boilerp
         inherit system;
       };
       
-      system = "x86-64_linux";
+      system = "x86_64-linux";
       username = "jd";
       stateVersion = "21.05";
     in {
