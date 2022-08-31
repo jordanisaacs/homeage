@@ -14,8 +14,8 @@ let
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
 
   createFiles = command: runtimepath: destinations: builtins.concatStringsSep "\n" ((map (dest: ''
-    mkdir -p $(dirname ${dest})
-    ${command} ${runtimepath} ${dest}
+    $DRY_RUN_CMD mkdir $VERBOSE_ARG -p $(dirname ${dest})
+    $DRY_RUN_CMD ${command} $VERBOSE_ARG ${runtimepath} ${dest}
   '')) destinations);
 
   decryptSecret = name: { source, path, symlinks, cpOnService, mode, owner, group, ... }:
@@ -24,22 +24,22 @@ let
       linksCmds = createFiles "ln -sf" runtimepath symlinks;
       copiesCmds = createFiles "cp -f" runtimepath cpOnService;
     in
-    pkgs.writeShellScriptBin "${name}-decrypt" ''
-      set -euo pipefail
-
+    ''
       echo "Decrypting secret ${source} to ${runtimepath}"
       TMP_FILE="${runtimepath}.tmp"
-      mkdir -p $(dirname ${runtimepath})
+      $DRY_RUN_CMD mkdir $VERBOSE_ARG -p $(dirname ${runtimepath})
       (
-        umask u=r,g=,o=
-        ${ageBin} -d ${identities} -o "$TMP_FILE" "${source}"
+        $DRY_RUN_CMD umask u=r,g=,o=
+        $DRY_RUN_CMD ${ageBin} -d ${identities} -o "$TMP_FILE" "${source}"
       )
-      chmod ${mode} "$TMP_FILE"
-      chown ${owner}:${group} "$TMP_FILE"
-      mv -f "$TMP_FILE" "${runtimepath}"
+      $DRY_RUN_CMD chmod $VERBOSE_ARG ${mode} "$TMP_FILE"
+      $DRY_RUN_CMD chown $VERBOSE_ARG ${owner}:${group} "$TMP_FILE"
+      $DRY_RUN_CMD mv $VERBOSE_ARG -f "$TMP_FILE" "${runtimepath}"
       ${linksCmds}
       ${copiesCmds}
     '';
+
+  activationScript = builtins.concatStringsSep "\n" (lib.attrsets.mapAttrsToList decryptSecret cfg.file);
 
   mkServices = lib.attrsets.mapAttrs'
     (name: value:
@@ -52,7 +52,13 @@ let
 
           Service = {
             Type = "oneshot";
-            ExecStart = "${decryptSecret name value}/bin/${name}-decrypt";
+            ExecStart = "${pkgs.writeShellScript "${name}-decrypt" ''
+              set -euo pipefail
+              DRY_RUN_CMD=
+              VERBOSE_ARG=
+
+              ${decryptSecret name value}
+            ''}";
             Environment = "PATH=${makeBinPath [ pkgs.coreutils ]}";
           };
 
@@ -144,6 +150,18 @@ in
       default = [ ];
       type = types.listOf types.str;
     };
+
+    installationType = mkOption {
+      description = ''
+        Specify the way how secrets should be installed. Either via systemd user services (<literal>service</literal>)
+        or during the activation of the generation (<literal>activation</literal>).
+        </para><para>
+        Note: Keep in mind that symlinked secrets will not work after reboots with <literal>activation</literal> if
+        <literal>homeage.mount</literal> does not point to persistent location.
+      '';
+      default = "service";
+      type = types.enum [ "activation" "service" ];
+    };
   };
 
   config = mkIf (cfg.file != { }) (mkMerge [
@@ -153,7 +171,11 @@ in
         message = "secret.identityPaths must be set.";
       }];
 
-      systemd.user.services = mkServices;
+      home.activation = mkIf (cfg.installationType == "activation") {
+        homeage = hm.dag.entryAfter [ "writeBoundary" ] activationScript;
+      };
+
+      systemd.user.services = mkIf (cfg.installationType == "service") mkServices;
     }
   ]);
 }
