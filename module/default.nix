@@ -8,6 +8,7 @@ let
   startupDecryptPath = path: cfg.startupMount + "/" + path;
   activationDecryptPath = path: cfg.activationMount + "/" + path;
 
+
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
 
   createFiles = command: runtimepath: destinations: builtins.concatStringsSep "\n" ((map (dest: ''
@@ -266,27 +267,6 @@ in
 
       systemd.user.services = mkServices;
 
-      home.activation.homeageCheck =
-        let
-          decryptSecretScript = name: source: ''
-            if ! ${ageBin} -d ${identities} -o /dev/null ${source} 2>/dev/null ; then
-              DECRYPTION="''${DECRYPTION}Failed to decrypt ${name}\n"
-            fi
-          '';
-
-          checkDecryptionScript = builtins.concatStringsSep "\n" ([
-            "DECRYPTION="
-          ] ++ (lib.mapAttrsToList (n: v: decryptSecretScript n v.source) cfg.file) ++ [
-            ''
-              if [ ! -z "$DECRYPTION" ]; then
-                printf "''${errorColor}''${DECRYPTION}\nCheck homeage.identityPaths to either add an identity or remove a broken one\n''${normalColor}" 1>&2
-                exit 1
-              fi
-            ''
-          ]);
-        in
-        hm.dag.entryBefore [ "writeBoundary" ] checkDecryptionScript;
-
       homeage = {
         pkg = lib.mkDefault pkgs.age;
         isRage = lib.mkDefault false;
@@ -297,4 +277,3 @@ in
     }
   ]);
 }
-
