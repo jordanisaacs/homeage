@@ -1,51 +1,69 @@
-{ pkgs, config, options, lib, ... }:
-with lib;
-
-let
+{
+  pkgs,
+  config,
+  options,
+  lib,
+  ...
+}:
+with lib; let
   cfg = config.homeage;
 
   # All files are decrypted to /run/user and cleaned up when rebooted
   runtimeDecryptFolder = cfg.mount;
 
-  ageBin = if cfg.isRage then "${cfg.pkg}/bin/rage" else "${cfg.pkg}/bin/age";
+  ageBin =
+    if cfg.isRage
+    then "${cfg.pkg}/bin/rage"
+    else "${cfg.pkg}/bin/age";
 
   runtimeDecryptPath = path: runtimeDecryptFolder + "/" + path;
 
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
 
-  createFiles = command: runtimepath: destinations: builtins.concatStringsSep "\n" ((map (dest: ''
-    $DRY_RUN_CMD mkdir $VERBOSE_ARG -p $(dirname ${dest})
-    $DRY_RUN_CMD ${command} $VERBOSE_ARG ${runtimepath} ${dest}
-  '')) destinations);
+  createFiles = command: runtimepath: destinations:
+    builtins.concatStringsSep "\n" ((map (dest: ''
+        $DRY_RUN_CMD mkdir $VERBOSE_ARG -p $(dirname ${dest})
+        $DRY_RUN_CMD ${command} $VERBOSE_ARG ${runtimepath} ${dest}
+      ''))
+      destinations);
 
-  decryptSecret = name: { source, path, symlinks, cpOnService, mode, owner, group, ... }:
-    let
-      runtimepath = runtimeDecryptPath path;
-      linksCmds = createFiles "ln -sf" runtimepath symlinks;
-      copiesCmds = createFiles "cp -f" runtimepath cpOnService;
-    in
-    ''
-      echo "Decrypting secret ${source} to ${runtimepath}"
-      TMP_FILE="${runtimepath}.tmp"
-      $DRY_RUN_CMD mkdir $VERBOSE_ARG -p $(dirname ${runtimepath})
-      (
-        $DRY_RUN_CMD umask u=r,g=,o=
-        $DRY_RUN_CMD ${ageBin} -d ${identities} -o "$TMP_FILE" "${source}"
-      )
-      $DRY_RUN_CMD chmod $VERBOSE_ARG ${mode} "$TMP_FILE"
-      $DRY_RUN_CMD chown $VERBOSE_ARG ${owner}:${group} "$TMP_FILE"
-      $DRY_RUN_CMD mv $VERBOSE_ARG -f "$TMP_FILE" "${runtimepath}"
-      ${linksCmds}
-      ${copiesCmds}
-    '';
+  decryptSecret = name: {
+    source,
+    path,
+    symlinks,
+    cpOnService,
+    mode,
+    owner,
+    group,
+    ...
+  }: let
+    runtimepath = runtimeDecryptPath path;
+    linksCmds = createFiles "ln -sf" runtimepath symlinks;
+    copiesCmds = createFiles "cp -f" runtimepath cpOnService;
+  in ''
+    echo "Decrypting secret ${source} to ${runtimepath}"
+    TMP_FILE="${runtimepath}.tmp"
+    $DRY_RUN_CMD mkdir $VERBOSE_ARG -p $(dirname ${runtimepath})
+    (
+      $DRY_RUN_CMD umask u=r,g=,o=
+      $DRY_RUN_CMD ${ageBin} -d ${identities} -o "$TMP_FILE" "${source}"
+    )
+    $DRY_RUN_CMD chmod $VERBOSE_ARG ${mode} "$TMP_FILE"
+    $DRY_RUN_CMD chown $VERBOSE_ARG ${owner}:${group} "$TMP_FILE"
+    $DRY_RUN_CMD mv $VERBOSE_ARG -f "$TMP_FILE" "${runtimepath}"
+    ${linksCmds}
+    ${copiesCmds}
+  '';
 
   activationScript = builtins.concatStringsSep "\n" (lib.attrsets.mapAttrsToList decryptSecret cfg.file);
 
-  mkServices = lib.attrsets.mapAttrs'
-    (name: value:
-      lib.attrsets.nameValuePair
-        ("${name}-secret")
-        ({
+  mkServices =
+    lib.attrsets.mapAttrs'
+    (
+      name: value:
+        lib.attrsets.nameValuePair
+        "${name}-secret"
+        {
           Unit = {
             Description = "Decrypt ${name} secret";
           };
@@ -59,19 +77,19 @@ let
 
               ${decryptSecret name value}
             ''}";
-            Environment = "PATH=${makeBinPath [ pkgs.coreutils ]}";
+            Environment = "PATH=${makeBinPath [pkgs.coreutils]}";
           };
 
           Install = {
-            WantedBy = [ "default.target" ];
+            WantedBy = ["default.target"];
           };
-        })
+        }
     )
     cfg.file;
 
   # Options for a secret file
   # Based on https://github.com/ryantm/agenix/pull/58
-  secretFile = types.submodule ({ name, ... }: {
+  secretFile = types.submodule ({name, ...}: {
     options = {
       path = mkOption {
         description = "Relative path of where the file will be saved in /run";
@@ -103,13 +121,13 @@ let
 
       symlinks = mkOption {
         type = types.listOf types.str;
-        default = [ ];
+        default = [];
         description = "Symbolically link decrypted file to absolute paths";
       };
 
       cpOnService = mkOption {
         type = types.listOf types.str;
-        default = [ ];
+        default = [];
         description = "Copy decrypted file to absolute paths";
       };
     };
@@ -118,12 +136,11 @@ let
       path = mkDefault name;
     };
   });
-in
-{
+in {
   options.homeage = {
     file = mkOption {
       description = "Attrset of secret files";
-      default = { };
+      default = {};
       type = types.attrsOf secretFile;
     };
 
@@ -147,7 +164,7 @@ in
 
     identityPaths = mkOption {
       description = "Absolute path to identity files used for age decryption. Must provide at least one path";
-      default = [ ];
+      default = [];
       type = types.listOf types.str;
     };
 
@@ -160,19 +177,21 @@ in
         <literal>homeage.mount</literal> does not point to persistent location.
       '';
       default = "service";
-      type = types.enum [ "activation" "service" ];
+      type = types.enum ["activation" "service"];
     };
   };
 
-  config = mkIf (cfg.file != { }) (mkMerge [
+  config = mkIf (cfg.file != {}) (mkMerge [
     {
-      assertions = [{
-        assertion = cfg.identityPaths != [ ];
-        message = "secret.identityPaths must be set.";
-      }];
+      assertions = [
+        {
+          assertion = cfg.identityPaths != [];
+          message = "secret.identityPaths must be set.";
+        }
+      ];
 
       home.activation = mkIf (cfg.installationType == "activation") {
-        homeage = hm.dag.entryAfter [ "writeBoundary" ] activationScript;
+        homeage = hm.dag.entryAfter ["writeBoundary"] activationScript;
       };
 
       systemd.user.services = mkIf (cfg.installationType == "service") mkServices;
