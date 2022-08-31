@@ -8,24 +8,23 @@
 with lib; let
   cfg = config.homeage;
 
-  # All files are decrypted to /run/user and cleaned up when rebooted
-  runtimeDecryptFolder = cfg.mount;
-
   ageBin =
     if cfg.isRage
     then "${cfg.pkg}/bin/rage"
     else "${cfg.pkg}/bin/age";
 
+  statePath = "homeage/state.json";
   runtimeDecryptPath = path: runtimeDecryptFolder + "/" + path;
 
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
 
-  createFiles = command: runtimepath: destinations:
-    builtins.concatStringsSep "\n" ((map (dest: ''
+  # Creates the directory and runs the command to connect the source file to destination
+  createFiles = command: path: dests:
+    concatStringsSep "\n" ((map (dest: ''
         mkdir -p $(dirname ${dest})
-        ${command} ${runtimepath} ${dest}
+        ${command} ${path} ${dest}
       ''))
-      destinations);
+      dests);
 
   decryptSecret = name: {
     source,
@@ -37,23 +36,22 @@ with lib; let
     group,
     ...
   }: let
-    runtimepath = runtimeDecryptPath path;
-    linksCmds = createFiles "ln -sf" runtimepath symlinks;
-    copiesCmds = createFiles "cp -f" runtimepath cpOnService;
+    linksCmds = createFiles "ln -sf" path symlinks;
+    copiesCmds = createFiles "cp -f" path cpOnService;
   in
     pkgs.writeShellScriptBin "${name}-decrypt" ''
       set -euo pipefail
 
-      echo "Decrypting secret ${source} to ${runtimepath}"
-      TMP_FILE="${runtimepath}.tmp"
-      mkdir -p $(dirname ${runtimepath})
+      echo "Decrypting secret ${source} to ${decryptpath}"
+      TMP_FILE="${decryptpath}.tmp"
+      mkdir -p $(dirname ${decryptpath})
       (
         umask u=r,g=,o=
         ${ageBin} -d ${identities} -o "$TMP_FILE" "${source}"
       )
       chmod ${mode} "$TMP_FILE"
       chown ${owner}:${group} "$TMP_FILE"
-      mv -f "$TMP_FILE" "${runtimepath}"
+      mv -f "$TMP_FILE" "${decryptpath}"
       ${linksCmds}
       ${copiesCmds}
     '';
@@ -84,10 +82,15 @@ with lib; let
 
   # Options for a secret file
   # Based on https://github.com/ryantm/agenix/pull/58
-  secretFile = types.submodule ({name, ...}: {
+  secretFile = {
+    name,
+    config,
+    ...
+  }: {
     options = {
       path = mkOption {
-        description = "Relative path of where the file will be saved in /run";
+        description = "Path of where the file will be decrypted";
+        default = "${cfg.mount}/${name}";
         type = types.str;
       };
 
@@ -126,17 +129,13 @@ with lib; let
         description = "Copy decrypted file to absolute paths";
       };
     };
-
-    config = {
-      path = mkDefault name;
-    };
-  });
+  };
 in {
   options.homeage = {
-    file = mkOption {
+    secrets = mkOption {
       description = "Attrset of secret files";
       default = {};
-      type = types.attrsOf secretFile;
+      type = with types; attrsOf (submodule secretFile);
     };
 
     pkg = mkOption {
@@ -152,7 +151,7 @@ in {
     };
 
     mount = mkOption {
-      description = "Absolute path to folder where decrypted files are stored. Files are decrypted on login. Defaults to /run which is a tmpfs.";
+      description = "Absolute path to folder where decrypted files are stored by default. Files are decrypted on login. Defaults to /run which is a tmpfs.";
       default = "/run/user/$UID/secrets";
       type = types.str;
     };
@@ -162,9 +161,21 @@ in {
       default = [];
       type = types.listOf types.str;
     };
+
+    cleanup = mkOption {
+      description = ''
+        Cleans up the outdated decrypted files and symlinks on activation. Secret file is assumed to not have been modified and is always deleted.
+
+        Cases when cp file/symlink is not removed:
+        1. Symlink when not pointing to the original secret path.
+        2. cp'd file when original secret file does not exist (can't verify they weren't modified).
+        3. cp'd file when it does not match the original secret file (using `cmp`)
+      '';
+      default = true;
+    };
   };
 
-  config = mkIf (cfg.file != {}) (mkMerge [
+  config = mkIf (cfg.secrets != {}) (mkMerge [
     {
       assertions = [
         {
@@ -172,6 +183,122 @@ in {
           message = "secret.identityPaths must be set.";
         }
       ];
+
+      home = {
+        extraBuilderCommands = let
+          stateFile =
+            pkgs.writeText
+            "homeage-state.json"
+            (builtins.toJSON
+              (map
+                (secret: secret)
+                (builtins.attrValues cfg.secrets)));
+        in ''
+          mkdir -p $(dirname $out/${statePath})
+          ln -s ${stateFile} $out/${statePath}
+        '';
+
+        activation = {
+          homeageDecryptionCheck = let
+            decryptSecretScript = name: source: ''
+              if ! ${ageBin} -d ${identities} -o /dev/null ${source} 2>/dev/null ; then
+                DECRYPTION="''${DECRYPTION}[homeage] Failed to decrypt ${name}\n""
+              fi
+            '';
+
+            checkDecryptionScript = builtins.concatStringsSep "\n" ([
+                "DECRYPTION="
+              ]
+              ++ (lib.mapAttrsToList (n: v: decryptSecretScript n v.source) cfg.file)
+              ++ [
+                ''
+                  if [ ! -x "$DECRYPTION" ]; then
+                    printf "''${errorColor}''${DECRYPTION}[homeage] Check homage.identityPaths to either add an identity or remove a broken one\n''${normalColor}" 1>&2
+                    exit 1
+                  fi
+                ''
+              ]);
+          in
+            hm.dag.entryBefore ["writeBoundary"] checkDecryptionScript;
+
+          homeageFileCleanup = let
+            fileCleanup = ''
+              # oldGenPath and newGenPath come from activation init:
+              # https://github.com/nix-community/home-manager/blob/master/modules/lib-bash/activation-init.sh
+              if [[ ! -v oldGenPath ]] ; then
+                echo "[homeage] No previous generation: no cleanup needed."
+                return 0
+              fi
+
+              local oldGenFile newGenFile
+              oldGenFile="$oldGenPath/${statePath}"
+              newGenFile="$newGenPath/${statePath}"
+
+              # Technically not possible (state always written if has secrets). Check anyway
+              if [ ! -L "$newGenFile" ]; then
+                echo "[homeage] Activated but no current state" >&2
+                return 1
+              fi
+
+              if [ ! -L "$oldGenFile" ]; then
+                echo "[homeage] No previous homeage state: no cleanup needed"
+                return 0
+              fi
+
+              ${pkgs.jq}/bin/jq \
+                --null-input \
+                --compact-output \
+                --argfile old "$oldGenFile" \
+                --argfile new "$newGenFile" \
+                '$old - $new | .[]' |
+              while IFS=$"\n" read -r c; do
+                path=$(echo "$c" | jq --raw-output '.path')
+                symlinks=$(echo "$c" | jq --raw-output '.symlinks[]')
+                files=$(echo "$c" | jq --raw-output '.cpOnService[]')
+
+                echo "[homeage] Cleaning up decrypted secret: $path\n"
+
+                for symlink in "''${symlinks[@]}"; do
+                  if [ ! "$(readlink "$symlink")" == "$path" ]; then
+                    echo "[homeage] Not removing symlink $symlink as it does not point to secret.\n"
+                    continue
+                  fi
+
+                  echo "[homeage] Removing symlink $symlink...\n"
+                  unlink "$symlink"
+                  rmdir --ignore-fail-on-non-empty --parents "$(dirname "$symlink")"
+                done
+
+                for file in "''${files[@]}"; do
+                  if [ ! -f "$path" ]; then
+                    echo "[homeage] Not removing cp'd file $file because secret does not exist so can't verify wasn't modified.\n"
+                    continue
+                  fi
+
+                  if [ ! cmp -s "$path" ]; then
+                    echo "[homeage] Not removing cp'd file $file because it was modified.\n"
+                    continue
+                  fi
+
+                  echo "[homeage] Removing file $file..."
+                  rm "$file"
+                  rmdir --ignore-fail-on-non-empty --parents "$(dirname "$file")"
+                done
+
+                if [ ! -f "$path" ]; then
+                  echo "[homeage] Not removing secret file $path because does not exist.\n"
+                  continue
+                else
+                  echo "[homeage] Removing secret file $path...\n"
+                  rm "$path"
+                  rmdir --ignore-fail-on-non-empty --parents "$(dirname "$path")"
+                fi
+              done
+            '';
+          in
+            hm.dag.entryBetween ["reloadSystemd"] ["writeBoundary"] fileCleanup;
+        };
+      };
 
       systemd.user.services = mkServices;
     }
