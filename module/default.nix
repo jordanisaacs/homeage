@@ -31,7 +31,7 @@ with lib; let
     source,
     path,
     symlinks,
-    cpOnService,
+    copies,
     mode,
     owner,
     group,
@@ -39,7 +39,7 @@ with lib; let
   }: let
     runtimepath = runtimeDecryptPath path;
     linksCmds = createFiles "ln -sf" runtimepath symlinks;
-    copiesCmds = createFiles "cp -f" runtimepath cpOnService;
+    copiesCmds = createFiles "cp -f" runtimepath copies;
   in ''
     echo "Decrypting secret ${source} to ${runtimepath}"
     TMP_FILE="${runtimepath}.tmp"
@@ -125,7 +125,7 @@ with lib; let
         description = "Symbolically link decrypted file to absolute paths";
       };
 
-      cpOnService = mkOption {
+      copies = mkOption {
         type = types.listOf types.str;
         default = [];
         description = "Copy decrypted file to absolute paths";
@@ -190,8 +190,31 @@ in {
         }
       ];
 
-      home.activation = mkIf (cfg.installationType == "activation") {
-        homeage = hm.dag.entryAfter ["writeBoundary"] activationScript;
+      home = {
+        activation = mkIf (cfg.installationType == "activation") {
+          homeageDecryptionCheck = let
+            decryptSecretScript = name: source: ''
+              if ! ${ageBin} -d ${identities} -o /dev/null ${source} 2>/dev/null ; then
+                DECRYPTION="''${DECRYPTION}Failed to decrypt ${name}\n""
+              fi
+            '';
+
+            checkDecryptionScript = ''
+              DECRYPTION=
+              ${
+                builtins.concatStringsSep "\n"
+                (lib.mapAttrsToList (n: v: decryptSecretScript n v.source) cfg.file)
+              }
+              if [ ! -x "$DECRYPTION" ]; then
+                printf "''${errorColor}''${DECRYPTION}Check homage.identityPaths to either add an identity or remove a broken one\n''${normalColor}" 1>&2
+                exit 1
+              fi
+            '';
+          in
+            hm.dag.entryBefore ["writeBoundary"] checkDecryptionScript;
+
+          homeageDecrypt = hm.dag.entryAfter ["writeBoundary"] activationScript;
+        };
       };
 
       systemd.user.services = mkIf (cfg.installationType == "service") mkServices;
