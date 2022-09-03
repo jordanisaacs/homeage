@@ -191,30 +191,33 @@ in {
       ];
 
       home = {
-        activation = mkIf (cfg.installationType == "activation") {
-          homeageDecryptionCheck = let
-            decryptSecretScript = name: source: ''
-              if ! ${ageBin} -d ${identities} -o /dev/null ${source} 2>/dev/null ; then
-                DECRYPTION="''${DECRYPTION}Failed to decrypt ${name}\n""
-              fi
-            '';
+        activation = mkMerge [
+          {
+            homeageDecryptionCheck = let
+              decryptSecretScript = name: source: ''
+                if ! ${ageBin} -d ${identities} -o /dev/null ${source} 2>/dev/null ; then
+                  DECRYPTION="''${DECRYPTION}[homeage] Failed to decrypt ${name}\n"
+                fi
+              '';
 
-            checkDecryptionScript = ''
-              DECRYPTION=
-              ${
-                builtins.concatStringsSep "\n"
-                (lib.mapAttrsToList (n: v: decryptSecretScript n v.source) cfg.file)
-              }
-              if [ ! -x "$DECRYPTION" ]; then
-                printf "''${errorColor}''${DECRYPTION}Check homage.identityPaths to either add an identity or remove a broken one\n''${normalColor}" 1>&2
-                exit 1
-              fi
-            '';
-          in
-            hm.dag.entryBefore ["writeBoundary"] checkDecryptionScript;
-
-          homeageDecrypt = hm.dag.entryAfter ["writeBoundary"] activationScript;
-        };
+              checkDecryptionScript = ''
+                DECRYPTION=
+                ${
+                  builtins.concatStringsSep "\n"
+                  (lib.mapAttrsToList (n: v: decryptSecretScript n v.source) cfg.file)
+                }
+                if [ ! -x $DECRYPTION ]; then
+                  printf "''${errorColor}''${DECRYPTION}[homeage] Check homage.identityPaths to either add an identity or remove a broken one\n''${normalColor}" 1>&2
+                  exit 1
+                fi
+              '';
+            in
+              hm.dag.entryBefore ["writeBoundary"] checkDecryptionScript;
+          }
+          (mkIf (cfg.installationType == "activation") {
+            homeageDecrypt = hm.dag.entryAfter ["writeBoundary"] activationScript;
+          })
+        ];
       };
 
       systemd.user.services = mkIf (cfg.installationType == "service") mkServices;
