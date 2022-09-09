@@ -8,14 +8,9 @@
 with lib; let
   cfg = config.homeage;
 
-  # All files are decrypted to /run/user and cleaned up when rebooted
-  runtimeDecryptFolder = cfg.mount;
-
-  ageBin =
-    let binName = (builtins.parseDrvName cfg.pkg.name).name;
-    in "${cfg.pkg}/bin/${binName}";
-
-  runtimeDecryptPath = path: runtimeDecryptFolder + "/" + path;
+  ageBin = let
+    binName = (builtins.parseDrvName cfg.pkg.name).name;
+  in "${cfg.pkg}/bin/${binName}";
 
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
 
@@ -25,6 +20,8 @@ with lib; let
         $DRY_RUN_CMD ${command} $VERBOSE_ARG ${runtimepath} ${dest}
       ''))
       destinations);
+
+  statePath = "homeage/state.json";
 
   decryptSecret = name: {
     source,
@@ -36,63 +33,131 @@ with lib; let
     group,
     ...
   }: let
-    runtimepath = runtimeDecryptPath path;
-    linksCmds = createFiles "ln -sf" runtimepath symlinks;
-    copiesCmds = createFiles "cp -f" runtimepath copies;
+    linksCmds = createFiles "ln -sf" path symlinks;
+    copiesCmds = createFiles "cp -f" path copies;
   in ''
-    echo "Decrypting secret ${source} to ${runtimepath}"
-    TMP_FILE="${runtimepath}.tmp"
-    $DRY_RUN_CMD mkdir $VERBOSE_ARG -p $(dirname ${runtimepath})
+    echo "Decrypting secret ${source} to ${path}"
+    TMP_FILE="${path}.tmp"
+    $DRY_RUN_CMD mkdir $VERBOSE_ARG -p $(dirname ${path})
     (
       $DRY_RUN_CMD umask u=r,g=,o=
       $DRY_RUN_CMD ${ageBin} -d ${identities} -o "$TMP_FILE" "${source}"
     )
     $DRY_RUN_CMD chmod $VERBOSE_ARG ${mode} "$TMP_FILE"
     $DRY_RUN_CMD chown $VERBOSE_ARG ${owner}:${group} "$TMP_FILE"
-    $DRY_RUN_CMD mv $VERBOSE_ARG -f "$TMP_FILE" "${runtimepath}"
+    $DRY_RUN_CMD mv $VERBOSE_ARG -f "$TMP_FILE" "${path}"
     ${linksCmds}
     ${copiesCmds}
   '';
 
-  activationScript = builtins.concatStringsSep "\n" (lib.attrsets.mapAttrsToList decryptSecret cfg.file);
+  cleanupSecret = prefix: ''
+    echo "${prefix}Cleaning up decrypted secret: $path"
 
-  mkServices =
-    lib.attrsets.mapAttrs'
-    (
-      name: value:
-        lib.attrsets.nameValuePair
-        "${name}-secret"
-        {
-          Unit = {
-            Description = "Decrypt ${name} secret";
-          };
+    # Cleanup symlinks
+    for symlink in ''${symlinks[@]}; do
+      if [ ! "$(readlink "$symlink")" == "$path" ]; then
+        echo "${prefix}Not removing symlink $symlink as it does not point to secret."
+        continue
+      fi
+      echo "${prefix}Removing symlink $symlink..."
+      unlink "$symlink"
+      rmdir --ignore-fail-on-non-empty --parents "$(dirname "$symlink")"
+    done
 
-          Service = {
-            Type = "oneshot";
-            ExecStart = "${pkgs.writeShellScript "${name}-decrypt" ''
-              set -euo pipefail
-              DRY_RUN_CMD=
-              VERBOSE_ARG=
+    # Cleanup copies
+    for copy in ''${copies[@]}; do
+      if [ ! -f $path ]; then
+        echo "${prefix}Not removing copied file $copy because secret does not exist so can't verify wasn't modified."
+        continue
+      fi
+      if ! cmp -s "$copy" "$path"; then
+        echo "${prefix}Not removing copied file $copy because it was modified."
+        continue
+      fi
+      echo "${prefix}Removing copied file $copy..."
+      rm "$copy"
+      rmdir --ignore-fail-on-non-empty --parents "$(dirname "$copy")"
+    done
 
-              ${decryptSecret name value}
-            ''}";
-            Environment = "PATH=${makeBinPath [pkgs.coreutils]}";
-          };
+    # Cleanup decrypted secret
+    if [ ! -f "$path" ]; then
+      echo "${prefix}Not removing secret file $path because does not exist."
+      continue
+    else
+      echo "${prefix}Removing secret file $path..."
+      rm "$path"
+      rmdir --ignore-fail-on-non-empty --parents "$(dirname "$path")"
+    fi
+  '';
 
-          Install = {
-            WantedBy = ["default.target"];
-          };
-        }
-    )
-    cfg.file;
+  activationFileCleanup = isActivation: ''
+    function homeageCleanup() {
+      # oldGenPath and newGenPath come from activation init:
+      # https://github.com/nix-community/home-manager/blob/master/modules/lib-bash/activation-init.sh
+      if [ ! -v oldGenPath ] ; then
+        echo "[homeage] No previous generation: no cleanup needed."
+        return 0
+      fi
+
+      local oldGenFile newGenFile
+      oldGenFile="$oldGenPath/${statePath}"
+      ${
+      lib.optionalString isActivation ''
+        local newGenFile
+        newGenFile="$newGenPath/${statePath}"
+
+        # Technically not possible (state always written if has secrets). Check anyway
+        if [ ! -L "$newGenFile" ]; then
+          echo "[homeage] Activated but no current state" >&2
+          return 1
+        fi
+      ''
+    }
+
+      if [ ! -L "$oldGenFile" ]; then
+        echo "[homeage] No previous homeage state: no cleanup needed"
+        return 0
+      fi
+
+      # Get all changed secrets for cleanup (intersection)
+      ${pkgs.jq}/bin/jq \
+        --null-input \
+        --compact-output \
+        --argfile old "$oldGenFile" \
+        ${
+      if isActivation
+      then ''
+        --argfile new "$newGenFile" \
+        '$old - $new | .[]' |
+      ''
+      else ''
+        '$old | .[]' |
+      ''
+    }
+      # Replace $UID with $(id -u). Don't use eval
+      ${pkgs.gnused}/bin/sed \
+        "s/\$UID/$(id -u)/g" |
+      while IFS=$"\n" read -r c; do
+        path=$(echo "$c" | jq --raw-output '.path')
+        symlinks=$(echo "$c" | jq --raw-output '.symlinks[]')
+        copies=$(echo "$c" | jq --raw-output '.copies[]')
+
+        ${cleanupSecret "[homeage] "}
+      done
+      echo "[homeage] Finished cleanup of secrets."
+    }
+
+    homeageCleanup
+  '';
 
   # Options for a secret file
   # Based on https://github.com/ryantm/agenix/pull/58
   secretFile = types.submodule ({name, ...}: {
     options = {
       path = mkOption {
-        description = "Relative path of where the file will be saved in /run";
+        description = "Absolute path of where the file will be saved. Defaults to mount/name";
         type = types.str;
+        default = "${cfg.mount}/${name}";
       };
 
       source = mkOption {
@@ -130,10 +195,6 @@ with lib; let
         description = "Copy decrypted file to absolute paths";
       };
     };
-
-    config = {
-      path = mkDefault name;
-    };
   });
 in {
   options.homeage = {
@@ -163,14 +224,32 @@ in {
 
     installationType = mkOption {
       description = ''
-        Specify the way how secrets should be installed. Either via systemd user services (<literal>service</literal>)
+        Specify the way how secrets should be installed. Either via systemd user services (<literal>systemd</literal>)
         or during the activation of the generation (<literal>activation</literal>).
         </para><para>
         Note: Keep in mind that symlinked secrets will not work after reboots with <literal>activation</literal> if
         <literal>homeage.mount</literal> does not point to persistent location.
+
+        When switching from systemd to activation with cleanup enabled one may need to activate twice.
+        This is because reloading/stopping systemd services happens after decryption.
+        Thus the systemd stop script may cleanup the newly decrypted secrets.
+        This issue only occurs on the first activation after switching.
       '';
-      default = "service";
-      type = types.enum ["activation" "service"];
+      default = "systemd";
+      type = types.enum ["activation" "systemd"];
+    };
+
+    cleanup = mkOption {
+      description = ''
+        Cleans up the outdated decrypted files and symlinks on activation. Secret file is assumed to not have been modified and is always deleted.
+
+        Cases when cp file/symlink is not removed:
+        1. Symlink when not pointing to the original secret path.
+        2. cp'd file when original secret file does not exist (can't verify they weren't modified).
+        3. cp'd file when it does not match the original secret file (using `cmp`)
+      '';
+      type = types.bool;
+      default = true;
     };
   };
 
@@ -181,39 +260,122 @@ in {
           assertion = cfg.identityPaths != [];
           message = "secret.identityPaths must be set.";
         }
+        {
+          assertion = let
+            paths = mapAttrsToList (_: value: value.path) cfg.file;
+          in
+            (unique paths) == paths;
+          message = "overlapping secret file paths.";
+        }
       ];
 
-      home = {
-        activation = mkMerge [
-          {
-            homeageDecryptionCheck = let
-              decryptSecretScript = name: source: ''
-                if ! ${ageBin} -d ${identities} -o /dev/null ${source} 2>/dev/null ; then
-                  DECRYPTION="''${DECRYPTION}[homeage] Failed to decrypt ${name}\n"
-                fi
-              '';
+      # Decryption check is enabled for all installation types
+      home.activation.homeageDecryptCheck = let
+        decryptCheckScript = name: source: ''
+          if ! ${ageBin} -d ${identities} -o /dev/null ${source} 2>/dev/null ; then
+            DECRYPTION="''${DECRYPTION}[homeage] Failed to decrypt ${name}\n"
+          fi
+        '';
 
-              checkDecryptionScript = ''
-                DECRYPTION=
-                ${
-                  builtins.concatStringsSep "\n"
-                  (lib.mapAttrsToList (n: v: decryptSecretScript n v.source) cfg.file)
-                }
-                if [ ! -x $DECRYPTION ]; then
-                  printf "''${errorColor}''${DECRYPTION}[homeage] Check homage.identityPaths to either add an identity or remove a broken one\n''${normalColor}" 1>&2
-                  exit 1
-                fi
-              '';
-            in
-              hm.dag.entryBefore ["writeBoundary"] checkDecryptionScript;
+        checkDecryptionScript = ''
+          DECRYPTION=
+          ${
+            builtins.concatStringsSep "\n"
+            (lib.mapAttrsToList (n: v: decryptCheckScript n v.source) cfg.file)
           }
-          (mkIf (cfg.installationType == "activation") {
-            homeageDecrypt = hm.dag.entryAfter ["writeBoundary"] activationScript;
-          })
-        ];
-      };
-
-      systemd.user.services = mkIf (cfg.installationType == "service") mkServices;
+          if [ ! -x $DECRYPTION ]; then
+            printf "''${errorColor}''${DECRYPTION}[homeage] Check homage.identityPaths to either add an identity or remove a broken one\n''${normalColor}" 1>&2
+            exit 1
+          fi
+        '';
+      in
+        hm.dag.entryBefore ["writeBoundary"] checkDecryptionScript;
     }
+    (mkIf (cfg.installationType == "activation") {
+      home = {
+        # Always write state if activation installation so will
+        # cleanup the previous generations when cleanup gets enabled
+        # Do not write if systemd installation because cleanup will be done through systemd units
+        extraBuilderCommands = let
+          stateFile =
+            pkgs.writeText
+            "homeage-state.json"
+            (builtins.toJSON
+              (map
+                (secret: secret)
+                (builtins.attrValues cfg.file)));
+        in ''
+          mkdir -p $(dirname $out/${statePath})
+          ln -s ${stateFile} $out/${statePath}
+        '';
+
+        activation = {
+          homeageCleanup = mkIf (cfg.cleanup) (let
+            fileCleanup = activationFileCleanup true;
+          in
+            hm.dag.entryBetween ["homeageDecrypt"] ["writeBoundary"] fileCleanup);
+
+          homeageDecrypt = let
+            activationScript = builtins.concatStringsSep "\n" (lib.attrsets.mapAttrsToList decryptSecret cfg.file);
+          in
+            hm.dag.entryBetween ["reloadSystemd"] ["writeBoundary"] activationScript;
+        };
+      };
+    })
+    (mkIf (cfg.installationType == "systemd") {
+      # Need to cleanup secrets if switching from activation -> systemd
+      home.activation.homeageCleanup = mkIf (cfg.cleanup) (let
+        fileCleanup = activationFileCleanup false;
+      in
+        hm.dag.entryAfter ["writeBoundary"] fileCleanup);
+
+      systemd.user.services = let
+        mkServices =
+          lib.attrsets.mapAttrs'
+          (
+            name: value:
+              lib.attrsets.nameValuePair
+              "${name}-secret"
+              {
+                Unit = {
+                  Description = "Decrypt ${name} secret";
+                };
+
+                Service = {
+                  Type = "oneshot";
+                  Environment = "PATH=${makeBinPath ([pkgs.coreutils]
+                    ++ (
+                      if cfg.cleanup
+                      then [pkgs.diffutils]
+                      else []
+                    ))}";
+                  ExecStart = "${pkgs.writeShellScript "${name}-decrypt" ''
+                    set -euo pipefail
+                    DRY_RUN_CMD=
+                    VERBOSE_ARG=
+
+                    ${decryptSecret name value}
+                  ''}";
+                  RemainAfterExit = mkIf (cfg.cleanup) true;
+                  ExecStop = mkIf (cfg.cleanup) "${pkgs.writeShellScript "${name}-cleanup" ''
+                    set -euo pipefail
+
+                    path="${value.path}"
+                    symlinks=(${builtins.concatStringsSep " " value.symlinks})
+                    copies=(${builtins.concatStringsSep " " value.copies})
+
+                    ${cleanupSecret ""}
+                  ''}";
+                };
+
+                Install = {
+                  WantedBy = ["default.target"];
+                };
+              }
+          )
+          cfg.file;
+      in
+        mkServices;
+    })
   ]);
 }
