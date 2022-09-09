@@ -12,9 +12,8 @@ with lib; let
   runtimeDecryptFolder = cfg.mount;
 
   ageBin =
-    if cfg.isRage
-    then "${cfg.pkg}/bin/rage"
-    else "${cfg.pkg}/bin/age";
+    let binName = (builtins.parseDrvName cfg.pkg.name).name;
+    in "${cfg.pkg}/bin/${binName}";
 
   runtimeDecryptPath = path: runtimeDecryptFolder + "/" + path;
 
@@ -148,12 +147,6 @@ in {
       description = "(R)age package to use";
       default = pkgs.age;
       type = types.package;
-    };
-
-    isRage = mkOption {
-      description = "Is rage package";
-      default = false;
-      type = types.bool;
     };
 
     mount = mkOption {
