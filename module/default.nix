@@ -230,26 +230,20 @@ in {
         Note: Keep in mind that symlinked secrets will not work after reboots with <literal>activation</literal> if
         <literal>homeage.mount</literal> does not point to persistent location.
 
-        When switching from systemd to activation with cleanup enabled one may need to activate twice.
-        This is because reloading/stopping systemd services happens after decryption.
-        Thus the systemd stop script may cleanup the newly decrypted secrets.
-        This issue only occurs on the first activation after switching.
+        Cleanup notes:
+        * Systemd performs cleanup when service stops.
+        * Activation performs cleanup after write boundary during activation.
+        * When switching from systemd to activation, may need to activate twice.
+          Because stopping systemd services, and thus cleanup, happens after
+          activation decryption. Only occurs on the first activation.
+
+        Cases when copied file/symlink is not removed:
+        1. Symlink does not point to the decrypted secret file.
+        2. Any copied file when the original secret file does not exist (can't verify they weren't modified).
+        3. Copied file when it does not match the original secret file (using `cmp`).
       '';
       default = "systemd";
       type = types.enum ["activation" "systemd"];
-    };
-
-    cleanup = mkOption {
-      description = ''
-        Cleans up the outdated decrypted files and symlinks on activation. Secret file is assumed to not have been modified and is always deleted.
-
-        Cases when cp file/symlink is not removed:
-        1. Symlink when not pointing to the original secret path.
-        2. cp'd file when original secret file does not exist (can't verify they weren't modified).
-        3. cp'd file when it does not match the original secret file (using `cmp`)
-      '';
-      type = types.bool;
-      default = true;
     };
   };
 
@@ -310,10 +304,10 @@ in {
         '';
 
         activation = {
-          homeageCleanup = mkIf (cfg.cleanup) (let
+          homeageCleanup = let
             fileCleanup = activationFileCleanup true;
           in
-            hm.dag.entryBetween ["homeageDecrypt"] ["writeBoundary"] fileCleanup);
+            hm.dag.entryBetween ["homeageDecrypt"] ["writeBoundary"] fileCleanup;
 
           homeageDecrypt = let
             activationScript = builtins.concatStringsSep "\n" (lib.attrsets.mapAttrsToList decryptSecret cfg.file);
@@ -324,10 +318,10 @@ in {
     })
     (mkIf (cfg.installationType == "systemd") {
       # Need to cleanup secrets if switching from activation -> systemd
-      home.activation.homeageCleanup = mkIf (cfg.cleanup) (let
+      home.activation.homeageCleanup = let
         fileCleanup = activationFileCleanup false;
       in
-        hm.dag.entryAfter ["writeBoundary"] fileCleanup);
+        hm.dag.entryAfter ["writeBoundary"] fileCleanup;
 
       systemd.user.services = let
         mkServices =
@@ -343,12 +337,7 @@ in {
 
                 Service = {
                   Type = "oneshot";
-                  Environment = "PATH=${makeBinPath ([pkgs.coreutils]
-                    ++ (
-                      if cfg.cleanup
-                      then [pkgs.diffutils]
-                      else []
-                    ))}";
+                  Environment = "PATH=${makeBinPath [pkgs.coreutils pkgs.diffutils]}";
                   ExecStart = "${pkgs.writeShellScript "${name}-decrypt" ''
                     set -euo pipefail
                     DRY_RUN_CMD=
@@ -356,8 +345,8 @@ in {
 
                     ${decryptSecret name value}
                   ''}";
-                  RemainAfterExit = mkIf (cfg.cleanup) true;
-                  ExecStop = mkIf (cfg.cleanup) "${pkgs.writeShellScript "${name}-cleanup" ''
+                  RemainAfterExit = true;
+                  ExecStop = "${pkgs.writeShellScript "${name}-cleanup" ''
                     set -euo pipefail
 
                     path="${value.path}"
