@@ -205,7 +205,7 @@ in {
     };
 
     pkg = mkOption {
-      description = "(R)age package to use";
+      description = "(R)age package to use. Detects if using rage and switches to `rage` as the command rather than `age`";
       default = pkgs.age;
       type = types.package;
     };

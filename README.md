@@ -5,40 +5,50 @@
 ## Features
 
 - [x] File agnostic declarative secrets that can be used inside your home-manager flakes
-- [x] Each secret gets decrypted with its own systemd service integrating seamlessly with home-manager reload and update
-- [x] Just normal age encryption, use ssh or age keys
-- [X] Add symbolic links to decrypted files
-- [x] Extremely little bash script so inspect the source yourself!
+- [X] Symlink (or copy if symlinks aren't supported) decrypted secrets
+- [X] Safely cleans up secrets on generation change or systemd service stop
+- [x] Encryption is normal age encryption, use your ssh or age keys
+- [X] Decryption/cleanup secrets either through systemd services or home-manager activation (for systems without systemd support)
 
 ## Management Scheme
 
-Pre-Build: Files are encrypted by external age key in repository (unencrypted with associated public key on roadmap)
+Pre-Build:
 
-Post-Build: Files are encrypted by external age key while in nix store
+* Encrypt files with age and make them accessible to home-manager config (through git repository, builtin function, etc.).
+* Install your age/ssh key outside of the scope home-manager.
 
-Runtime: Files are stored unencrypted in `/run/user/$UID/secrets` and can be symlinked to other locations
+Post-build:
 
-Notes (in progress [fixes](https://github.com/jordanisaacs/homeage/issues/8#issue-1047731755)):
+* Encrypted files are copied into the nix store (globally available).
+* Scripts for decrypting are are in the nix store (globally available).
+    * Because of this **must** to make sure your decryption key has correct file permissions set.
 
-1. All `home.file.<name>.symlinks` are not cleaned up on new home-manager generation. Therefore a symlink that points to a decrypted yaml file named `hello` in one generation, instead of being deleted will point to a png file named `hello` in the next.
+### Systemd Installation
 
-2. The `/run` secrets folder is not cleaned on home-manager activation. Therefore old secrets will exist decrypted until reboot.
+Service Start:
+* Decrypts secret and copies/symlinks to locations
 
-3. Use the `cpOnService` at your own risk, as cleanup is not implemented the decrypted file will exist until manually deleted
+Service Stop:
+* Cleans up decrypted secret and associated copies/symlinks
 
-## Roadmap
+Home-manager activation:
+* With home-manager systemd reload enabled services will automatically reload/stop during activation for seamless cleanup and re-installation.
 
-- [ ] Implement cleanup
-- [ ] Support passphrases
-- [ ] Support unencrypted with public key files
-- [ ] Add activation checks
-- [ ] Add tests
+### Activation Installation
+
+Home-manager activation:
+* Cleans up all secrets that changed between current and previous generation
+* Decrypts secret and copies/symlinks to locations
 
 ## Getting started
 
+### Non-flake
+
+If you are using homeage without nix flakes feel free to contribute an example config.
+
 ### Nix Flakes
 
-While the following below is immense, its mostly just home manager flake boilerplate. All you need to do is import `homeage.homeManagerModules.homeage` into the configuration and set a valid `homeage.identityPaths` and your all set.
+Import `homeage.homeManagerModules.homeage` into the configuration and set valid `homeage.identityPaths` and your all set.
 
 ```nix
 {
@@ -75,12 +85,19 @@ While the following below is immense, its mostly just home manager flake boilerp
             home.username = username;
             home.homeDirectory = "/home/${username}";
 
-            # CHECK HERE for homeage configuration
-            homeage.identityPaths = [ "~/.ssh/id_ed25519" ];
-            homeage.file."pijulsecretkey" = {
-              source = ./secretkey.json.age;
-              path = "pijul/secretkey.json";
-              symlinks = [ "${config.xdg.configHome}/pijul/secretkey.json" ];
+            homeage = {
+                # Absolute path to identity (created not through home-manager)
+                identityPaths = [ "~/.ssh/id_ed25519" ];
+
+                # "activation" if system doesn't support systemd
+                installationType = "systemd";
+
+                file."pijulsecretkey" = {
+                  # Path to encrypted file tracked by the git repository
+                  source = ./secretkey.json.age;
+                  symlinks = [ "${config.xdg.configHome}/pijul/secretkey.json" ];
+                  copies = [ "${config.xdg.configHome}/no-symlink-support/secretkey.json" ];
+                };
             };
 
             imports = [ homeage.homeManagerModules.homeage ];
@@ -93,11 +110,7 @@ While the following below is immense, its mostly just home manager flake boilerp
 
 ## Options
 
-Check out all the [options](./options.md)
-
-## How it works
-
-On home manager build, the age-encrypted files are built into the nix store and symlinked to the provided `homeage.folder` path. This is achieved through the home-manager `home.file` option. Notice that all secret files are encrypted while in the nix store. After the symlinks are finished by home-manager, the systemd units are run. Each secret has its own `oneshot` service that runs a decryption script. This works seamlessly with home-managers updating/reloading of systemd units. The script decrypts the secrets to `/run/user/$UID/secrets/` using the identities provided by `homeage.identityPaths`. It then acts on the decrypted file (changing ownership, linking, etc.). When rebooting, the decrypted files are lost as they are in the `/run` folder. Therefore, the systemd unit is wanted by `default.target` so it will run on startup.
+See [source](./module/default.nix) for all the options and their descriptions.
 
 ## Acknowledgments
 
