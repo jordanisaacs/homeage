@@ -152,8 +152,13 @@ with lib; let
 
   # Options for a secret file
   # Based on https://github.com/ryantm/agenix/pull/58
-  secretFile = types.submodule ({name, ...}: {
+  secretFile = types.submodule ({config, name, ...}: {
     options = {
+      name = mkOption {
+        description = "Name of file.";
+        type = types.str;
+      };
+
       path = mkOption {
         description = "Absolute path of where the file will be saved. Defaults to mount/name";
         type = types.str;
@@ -194,6 +199,10 @@ with lib; let
         default = [];
         description = "Copy decrypted file to absolute paths";
       };
+    };
+
+    config = {
+      name = mkDefault config.name;
     };
   });
 in {
