@@ -12,6 +12,8 @@ with lib; let
     binName = (builtins.parseDrvName cfg.pkg.name).name;
   in "${cfg.pkg}/bin/${binName}";
 
+  jq = lib.getExe pkgs.jq;
+
   identities = builtins.concatStringsSep " " (map (path: "-i ${path}") cfg.identityPaths);
 
   createFiles = command: runtimepath: destinations:
@@ -120,7 +122,7 @@ with lib; let
       fi
 
       # Get all changed secrets for cleanup (intersection)
-      ${pkgs.jq}/bin/jq \
+      ${jq} \
         --null-input \
         --compact-output \
         --argfile old "$oldGenFile" \
@@ -138,9 +140,9 @@ with lib; let
       ${pkgs.gnused}/bin/sed \
         "s/\$UID/$(id -u)/g" |
       while IFS=$"\n" read -r c; do
-        path=$(echo "$c" | jq --raw-output '.path')
-        symlinks=$(echo "$c" | jq --raw-output '.symlinks[]')
-        copies=$(echo "$c" | jq --raw-output '.copies[]')
+        path=$(echo "$c" | ${jq} --raw-output '.path')
+        symlinks=$(echo "$c" | ${jq} --raw-output '.symlinks[]')
+        copies=$(echo "$c" | ${jq} --raw-output '.copies[]')
 
         ${cleanupSecret "[homeage] "}
       done
