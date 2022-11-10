@@ -20,7 +20,7 @@ Pre-Build:
 Post-build:
 
 * Encrypted files are copied into the nix store (globally available).
-* Scripts for decrypting are are in the nix store (globally available).
+* Scripts for decrypting are in the nix store (globally available).
     * Because of this **must** to make sure your decryption key has correct file permissions set.
 
 ### Systemd Installation
