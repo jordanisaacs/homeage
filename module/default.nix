@@ -154,7 +154,7 @@ with lib; let
 
   # Options for a secret file
   # Based on https://github.com/ryantm/agenix/pull/58
-  secretFile = types.submodule ({name, ...}: {
+  secretType = types.submodule ({ name, ... }: {
     options = {
       path = mkOption {
         description = "Absolute path of where the file will be saved. Defaults to mount/name";
@@ -200,10 +200,10 @@ with lib; let
   });
 in {
   options.homeage = {
-    file = mkOption {
-      description = "Attrset of secret files";
-      default = {};
-      type = types.attrsOf secretFile;
+    secrets = mkOption {
+      description = "Attrset of secrets";
+      default = { };
+      type = types.attrsOf secretType;
     };
 
     pkg = mkOption {
@@ -249,7 +249,7 @@ in {
     };
   };
 
-  config = mkIf (cfg.file != {}) (mkMerge [
+  config = mkIf (cfg.secrets != {}) (mkMerge [
     {
       assertions = [
         {
@@ -258,7 +258,7 @@ in {
         }
         {
           assertion = let
-            paths = mapAttrsToList (_: value: value.path) cfg.file;
+            paths = mapAttrsToList (_: value: value.path) cfg.secrets;
           in
             (unique paths) == paths;
           message = "overlapping secret file paths.";
@@ -277,7 +277,7 @@ in {
           DECRYPTION=
           ${
             builtins.concatStringsSep "\n"
-            (lib.mapAttrsToList (n: v: decryptCheckScript n v.source) cfg.file)
+            (lib.mapAttrsToList (n: v: decryptCheckScript n v.source) cfg.secrets)
           }
           if [ ! -x $DECRYPTION ]; then
             printf "''${errorColor}''${DECRYPTION}[homeage] Check homage.identityPaths to either add an identity or remove a broken one\n''${normalColor}" 1>&2
@@ -299,7 +299,7 @@ in {
             (builtins.toJSON
               (map
                 (secret: secret)
-                (builtins.attrValues cfg.file)));
+                (builtins.attrValues cfg.secrets)));
         in ''
           mkdir -p $(dirname $out/${statePath})
           ln -s ${stateFile} $out/${statePath}
@@ -312,7 +312,7 @@ in {
             hm.dag.entryBetween ["homeageDecrypt"] ["writeBoundary"] fileCleanup;
 
           homeageDecrypt = let
-            activationScript = builtins.concatStringsSep "\n" (lib.attrsets.mapAttrsToList decryptSecret cfg.file);
+            activationScript = builtins.concatStringsSep "\n" (lib.attrsets.mapAttrsToList decryptSecret cfg.secrets);
           in
             hm.dag.entryBetween ["reloadSystemd"] ["writeBoundary"] activationScript;
         };
@@ -364,7 +364,7 @@ in {
                 };
               }
           )
-          cfg.file;
+          cfg.secrets;
       in
         mkServices;
     })
