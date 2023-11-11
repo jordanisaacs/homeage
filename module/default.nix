@@ -279,7 +279,7 @@ in {
             builtins.concatStringsSep "\n"
             (lib.mapAttrsToList (n: v: decryptCheckScript n v.source) cfg.file)
           }
-          if [ ! -x $DECRYPTION ]; then
+          if [ -n "$DECRYPTION" ]; then
             printf "''${errorColor}''${DECRYPTION}[homeage] Check homage.identityPaths to either add an identity or remove a broken one\n''${normalColor}" 1>&2
             exit 1
           fi
